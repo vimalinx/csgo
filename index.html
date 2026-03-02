@@ -56,10 +56,21 @@
             <div class="ch ch--left"></div>
             <div class="ch ch--right"></div>
           </div>
+
+          <div id="hitmarker" class="hitmarker" aria-hidden="true">
+            <div class="hm hm--tl"></div>
+            <div class="hm hm--tr"></div>
+            <div class="hm hm--bl"></div>
+            <div class="hm hm--br"></div>
+          </div>
         </div>
         <div class="hud__right">
           <div id="weaponName" class="weapon">Pistol</div>
           <div class="ammo"><span id="ammoText">12 / 36</span></div>
+          <div id="reloadWrap" class="reload" aria-hidden="true">
+            <div class="reload__track"><div id="reloadBar" class="reload__fill"></div></div>
+            <div id="reloadText" class="reload__text">Reloading</div>
+          </div>
           <div class="small" id="tipText"></div>
         </div>
       </div>

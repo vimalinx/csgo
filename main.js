@@ -11,6 +11,11 @@ const arText = document.getElementById('arText');
 const weaponNameEl = document.getElementById('weaponName');
 const ammoText = document.getElementById('ammoText');
 const tipText = document.getElementById('tipText');
+const hitmarkerEl = document.getElementById('hitmarker');
+const reloadWrap = document.getElementById('reloadWrap');
+const reloadBar = document.getElementById('reloadBar');
+const reloadText = document.getElementById('reloadText');
+const crosshairEl = document.querySelector('.crosshair');
 
 canvas.tabIndex = 0;
 
@@ -273,6 +278,17 @@ function rayAabb(ro, rd, box) {
   return tmin >= 0 ? tmin : tmax;
 }
 
+function rayObbLocal(ro, rd, center, right, up, forward, half) {
+  const d = v3sub(ro, center);
+  const roL = v3(v3dot(d, right), v3dot(d, up), v3dot(d, forward));
+  const rdL = v3(v3dot(rd, right), v3dot(rd, up), v3dot(rd, forward));
+  const box = {
+    min: v3(-half.x, -half.y, -half.z),
+    max: v3(half.x, half.y, half.z),
+  };
+  return rayAabb(roL, rdL, box);
+}
+
 function nowMs() {
   return performance.now();
 }
@@ -479,6 +495,18 @@ function makeBot(id, pos) {
     respawnAt: 0,
     nextThinkAt: 0,
     shootCooldown: 0,
+    weapon: {
+      rpm: 240,
+      damage: 5,
+      magSize: 18,
+      mag: 18,
+      reserve: 999,
+      reloadSec: 1.3,
+      reloading: false,
+      reloadLeft: 0,
+      reloadTotal: 1.3,
+      spreadDeg: 2.2,
+    },
     state: 'patrol',
     patrolPhase: Math.random() * Math.PI * 2,
   };
@@ -519,6 +547,7 @@ class WeaponState {
     this.cooldown = 0;
     this.reloading = false;
     this.reloadLeft = 0;
+    this.reloadTotal = def.reloadSec;
     this.kick = 0;
     this.shot = 0;
     this.flash = 0;
@@ -547,6 +576,12 @@ class Game {
     this.targets = [];
     this.bots = [];
     this.shells = [];
+    this.tracers = [];
+    this.hitmarker = { t: 0, head: false };
+    this.autoFire = true;
+    this.crosshairGap = 9;
+    this.crouchT = 0;
+    this.landKick = 0;
     this.lastStatusAt = 0;
   }
 
@@ -685,6 +720,34 @@ function updateHud() {
   arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
   const w = game.getWeapon();
   ammoText.textContent = `${w.mag} / ${w.reserve}`;
+
+  const isReloading = w.reloading;
+  reloadWrap.classList.toggle('show', isReloading);
+  if (isReloading) {
+    const p = clamp01(1 - w.reloadLeft / Math.max(0.0001, w.reloadTotal));
+    reloadBar.style.width = `${p * 100}%`;
+    reloadText.textContent = `Reloading ${Math.ceil(w.reloadLeft * 10) / 10}s`;
+  }
+
+  if (game.hitmarker.t > 0) {
+    hitmarkerEl.classList.add('show');
+    hitmarkerEl.classList.toggle('head', game.hitmarker.head);
+  } else {
+    hitmarkerEl.classList.remove('show');
+    hitmarkerEl.classList.remove('head');
+  }
+
+  const speed = Math.hypot(game.vel.x, game.vel.z);
+  const moving = clamp01(speed / 6);
+  const firing = clamp01(w.kick);
+  const crouch = clamp01(game.crouchT);
+  const air = game.onGround ? 0 : 1;
+  const land = clamp01(game.landKick);
+  const gap = 9 + moving * 22 + firing * 10 - crouch * 6 + air * 16 + land * 14;
+  const len = 8 + moving * 4;
+  const host = crosshairEl || hud;
+  host.style.setProperty('--ch-gap', `${gap.toFixed(1)}px`);
+  host.style.setProperty('--ch-len', `${len.toFixed(1)}px`);
 }
 
 function setOverlayVisible(visible) {
@@ -744,6 +807,10 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') game.switchWeapon(0);
   if (e.code === 'Digit2') game.switchWeapon(1);
   if (e.code === 'KeyR') tryReload();
+  if (e.code === 'KeyB') {
+    game.autoFire = !game.autoFire;
+    setStatus(`Fire mode: ${game.autoFire ? 'AUTO' : 'SEMI'}`, false);
+  }
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
 
@@ -796,6 +863,7 @@ function tryReload() {
     return;
   }
   w.reloading = true;
+  w.reloadTotal = w.def.reloadSec;
   w.reloadLeft = w.def.reloadSec;
   audio.reload();
   setStatus('Reloading...', false);
@@ -873,7 +941,7 @@ function updateWeapon(dt) {
   }
 
   const fireHeld = game.mouseDown && game.pointerLocked;
-  const wantsFire = fireHeld || game.firePressed;
+  const wantsFire = game.autoFire ? fireHeld || game.firePressed : game.firePressed;
   if (!wantsFire) return;
   if (w.cooldown > 0) return;
   if (w.mag <= 0) {
@@ -890,66 +958,133 @@ function updateWeapon(dt) {
   w.shot = Math.min(1, w.shot + 0.95);
   w.flash = 1;
 
-  const recoil = w.def.recoil * (0.6 + Math.random() * 0.5);
+  const recoilBase = w.def.recoil * (0.6 + Math.random() * 0.5);
+  const recoil = game.autoFire ? recoilBase * 1.25 : recoilBase;
   game.pitch += recoil * 0.012;
   game.yaw += (Math.random() - 0.5) * recoil * 0.007;
   w.kick = Math.min(1, w.kick + 0.35);
 
-  const spread = (w.def.spreadDeg * Math.PI) / 180;
+  const spread = ((game.autoFire ? w.def.spreadDeg * 1.15 : w.def.spreadDeg) * Math.PI) / 180;
   const sx = (Math.random() - 0.5) * spread;
   const sy = (Math.random() - 0.5) * spread;
-  const rd = v3norm(forwardFromYawPitch(game.yaw + sx, game.pitch + sy));
-  const ro = v3(game.pos.x, game.pos.y + 1.6, game.pos.z);
+  const fwdCam = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
+  const upCam = v3(0, 1, 0);
+  const rightCam = v3norm(v3cross(upCam, fwdCam));
+  const camUp = v3norm(v3cross(fwdCam, rightCam));
+  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+
+  const wpn = game.getWeapon();
+  const kick = wpn.kick;
+  const speed = Math.hypot(game.vel.x, game.vel.z);
+
+  const crouchAcc = lerp(1, 0.22, game.crouchT);
+  const moveAcc = 1 + clamp01(speed / 6) * 2.2;
+  const airAcc = game.onGround ? 1 : 2.2;
+  const landAcc = 1 + game.landKick * 1.8;
+  const spreadAcc = crouchAcc * moveAcc;
+
+  const finalAcc = spreadAcc * airAcc * landAcc;
+  const aimDirAcc = v3norm(forwardFromYawPitch(game.yaw + sx * finalAcc, game.pitch + sy * finalAcc));
+  const bobT = nowMs() * 0.001;
+  const bobA = 0.02 * clamp01(speed / 6);
+  const bobY = Math.sin(bobT * 9.5) * bobA;
+  const bobX = Math.cos(bobT * 9.5) * bobA;
+  const swayPosX = clamp(game.mouseDX * 0.0005, -0.03, 0.03);
+  const swayPosY = clamp(game.mouseDY * 0.0005, -0.03, 0.03);
+
+  const muzzle = v3add(
+    camPos,
+    v3add(
+      v3add(v3scale(rightCam, 0.55 + bobX + swayPosX), v3scale(camUp, -0.45 + bobY + kick * 0.03 + swayPosY)),
+      v3scale(fwdCam, 0.95)
+    )
+  );
+
+  const roAim = camPos;
+  const rdAim = aimDirAcc;
+  const roTrace = muzzle;
+  const rdTrace = aimDirAcc;
 
   let bestT = Infinity;
   let bestTarget = null;
+  let bestZone = '';
+  let bestMult = 1;
 
   for (const c of game.colliders) {
-    const t = rayAabb(ro, rd, c);
+    const t = rayAabb(roAim, rdAim, c);
     if (t === null) continue;
     if (t > 0 && t < bestT) bestT = t;
   }
 
   for (const bot of game.bots) {
     if (!bot.alive) continue;
-    const center = v3(bot.pos.x, bot.pos.y + bot.half.y, bot.pos.z);
-    const box = aabbFromCenter(center, bot.half);
-    const t = rayAabb(ro, rd, box);
-    if (t === null) continue;
-    if (t > 0 && t < bestT) {
-      bestT = t;
-      bestTarget = bot;
+    const up = v3(0, 1, 0);
+    const f = v3norm(forwardFromYawPitch(bot.yaw, 0));
+    const r = v3norm(v3cross(up, f));
+    const u = up;
+    const base = v3(bot.pos.x, bot.pos.y, bot.pos.z);
+    const hip = v3add(base, v3(0, 0.95, 0));
+
+    const hitboxes = [
+      { zone: 'head', mult: 4.0, c: v3add(hip, v3(0, 1.18, 0.02)), h: v3(0.16, 0.16, 0.16) },
+      { zone: 'upper', mult: 1.25, c: v3add(hip, v3(0, 0.78, 0.02)), h: v3(0.25, 0.22, 0.16) },
+      { zone: 'lower', mult: 1.0, c: v3add(hip, v3(0, 0.25, 0)), h: v3(0.28, 0.38, 0.15) },
+      { zone: 'arm', mult: 0.75, c: v3add(hip, v3(0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09) },
+      { zone: 'arm', mult: 0.75, c: v3add(hip, v3(-0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09) },
+      { zone: 'leg', mult: 0.75, c: v3add(base, v3(0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11) },
+      { zone: 'leg', mult: 0.75, c: v3add(base, v3(-0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11) },
+    ];
+
+    for (const hb of hitboxes) {
+      const t = rayObbLocal(roAim, rdAim, hb.c, r, u, f, hb.h);
+      if (t === null) continue;
+      if (t > 0 && t < bestT) {
+        bestT = t;
+        bestTarget = bot;
+        bestZone = hb.zone;
+        bestMult = hb.mult;
+      }
     }
   }
 
   if (bestTarget) {
-    bestTarget.hp -= w.def.damage;
+    const dmg = Math.floor(w.def.damage * bestMult);
+    bestTarget.hp -= dmg;
     audio.hit();
     game.lastStatusAt = nowMs();
+    game.hitmarker.t = 0.12;
+    game.hitmarker.head = bestZone === 'head';
     if (bestTarget.hp <= 0) {
       bestTarget.alive = false;
       bestTarget.respawnAt = nowMs() + 2500;
       setStatus('Bot down', false);
     } else {
-      setStatus(`Hit: -${w.def.damage}`, false);
+      const z = bestZone ? ` ${bestZone}` : '';
+      setStatus(`Hit${z}: -${dmg}`, false);
     }
   } else {
     setStatus('Miss', false);
   }
 
-  const fwd = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
-  const up = v3(0, 1, 0);
-  const right = v3norm(v3cross(up, fwd));
-  const camUp = v3norm(v3cross(fwd, right));
-  const eye = v3(game.pos.x, game.pos.y + 1.6, game.pos.z);
+  const endAim = bestT < Infinity ? v3add(roAim, v3scale(rdAim, Math.min(bestT, 80))) : v3add(roAim, v3scale(rdAim, 80));
+  const endTrace = endAim;
+  game.tracers.push({
+    a: roTrace,
+    b: endTrace,
+    travel: 0,
+    speed: 110,
+    life: 0.32,
+    hue: 0.55,
+  });
+
   const shellPos = v3add(
-    eye,
-    v3add(v3scale(right, 0.35), v3add(v3scale(camUp, -0.22), v3scale(fwd, 0.62)))
+    camPos,
+    v3add(v3scale(rightCam, 0.42), v3add(v3scale(camUp, -0.22), v3scale(fwdCam, 0.62)))
   );
   const rv = 2.4 + Math.random() * 1.2;
   const uv = 1.6 + Math.random() * 1.0;
   const fv = 0.8 + Math.random() * 0.7;
-  const shellVel = v3add(v3scale(right, rv), v3add(v3scale(camUp, uv), v3scale(fwd, fv)));
+  const shellVel = v3add(v3scale(rightCam, rv), v3add(v3scale(camUp, uv), v3scale(fwdCam, fv)));
   game.shells.push({ pos: shellPos, vel: shellVel, life: 1.6 });
 }
 
@@ -969,9 +1104,23 @@ function updateShells(dt) {
   game.shells = game.shells.filter((s) => s.life > 0);
 }
 
+function updateTracers(dt) {
+  for (const t of game.tracers) {
+    t.life -= dt;
+    t.travel = Math.min(1, (t.travel || 0) + dt * (t.speed || 120) / Math.max(0.001, v3len(v3sub(t.b, t.a))));
+  }
+  game.tracers = game.tracers.filter((t) => t.life > 0);
+}
+
+function updateHitmarker(dt) {
+  if (game.hitmarker.t > 0) game.hitmarker.t = Math.max(0, game.hitmarker.t - dt);
+}
+
 function updatePlayer(dt) {
   const sprint = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
-  const maxSpeed = sprint ? 6.8 : 4.8;
+  const crouching = game.keys.has('ControlLeft') || game.keys.has('ControlRight');
+  const baseSpeed = sprint ? 6.8 : 4.8;
+  const maxSpeed = crouching ? baseSpeed * 0.55 : baseSpeed;
   const accel = game.onGround ? 45 : 18;
   const friction = game.onGround ? 14 : 1;
 
@@ -1017,6 +1166,9 @@ function updatePlayer(dt) {
   const moved = moveAndCollide(game.pos, delta, game.colliders);
   game.pos = moved.pos;
   if (moved.onGround) {
+    if (!game.onGround && game.vel.y < -4) {
+      game.landKick = Math.min(1, game.landKick + clamp01((-game.vel.y - 4) / 10));
+    }
     game.onGround = true;
     if (game.vel.y < 0) game.vel.y = 0;
   } else {
@@ -1025,6 +1177,11 @@ function updatePlayer(dt) {
 
   game.pos.x = clamp(game.pos.x, -18.5, 18.5);
   game.pos.z = clamp(game.pos.z, -18.5, 18.5);
+
+  const targetC = crouching ? 1 : 0;
+  game.crouchT = lerp(game.crouchT, targetC, clamp01(dt * 12));
+
+  if (game.landKick > 0) game.landKick = Math.max(0, game.landKick - dt * 3.2);
 }
 
 function updateTargets(dt) {
@@ -1056,6 +1213,17 @@ function updateBots(dt) {
     }
 
     if (b.shootCooldown > 0) b.shootCooldown = Math.max(0, b.shootCooldown - dt);
+
+    const bw = b.weapon;
+    if (bw.reloading) {
+      bw.reloadLeft -= dt;
+      if (bw.reloadLeft <= 0) {
+        const take = Math.min(bw.magSize - bw.mag, bw.reserve);
+        bw.mag += take;
+        bw.reserve -= take;
+        bw.reloading = false;
+      }
+    }
 
     const toPlayer = v3sub(playerEye, v3(b.pos.x, b.pos.y + 1.6, b.pos.z));
     const dist = v3len(toPlayer);
@@ -1099,20 +1267,43 @@ function updateBots(dt) {
     b.pos.z = clamp(b.pos.z, -18.2, 18.2);
 
     if (shouldChase && dist < 20 && !occluded && b.shootCooldown <= 0) {
-      const hitChance = clamp01((20 - dist) / 20);
-      if (Math.random() < 0.12 + 0.35 * hitChance) {
-        game.hp -= 6;
-        if (game.hp <= 0) {
-          game.hp = 100;
-          game.armor = 0;
-          game.pos = v3(0, 1.1, 10);
-          game.vel = v3(0, 0, 0);
-          setStatus('You died (respawn)', true);
-        } else {
-          setStatus('Hit by bot', true);
-        }
+      if (!bw.reloading && bw.mag <= 0) {
+        bw.reloading = true;
+        bw.reloadTotal = bw.reloadSec;
+        bw.reloadLeft = bw.reloadSec;
       }
-      b.shootCooldown = 0.35 + Math.random() * 0.25;
+
+      if (!bw.reloading && bw.mag > 0) {
+        bw.mag -= 1;
+
+        const cooldown = 60 / bw.rpm;
+        b.shootCooldown = cooldown * (1.45 + Math.random() * 0.6);
+
+        const spread = (bw.spreadDeg * Math.PI) / 180;
+        const sx = (Math.random() - 0.5) * spread;
+        const sy = (Math.random() - 0.5) * spread;
+        const shotDir = v3norm(forwardFromYawPitch(b.yaw + sx, sy));
+
+        const muzzle = v3add(lookFrom, v3add(v3scale(v3norm(v3cross(v3(0, 1, 0), shotDir)), 0.18), v3scale(shotDir, 0.55)));
+        const end = v3add(muzzle, v3scale(shotDir, Math.min(dist + 4, 80)));
+        game.tracers.push({ a: muzzle, b: end, travel: 0, speed: 95, life: 0.32, hue: 0.02 });
+
+        const hitChance = clamp01((22 - dist) / 22);
+        if (Math.random() < 0.02 + 0.12 * hitChance) {
+          game.hp -= bw.damage;
+          if (game.hp <= 0) {
+            game.hp = 100;
+            game.armor = 0;
+            game.pos = v3(0, 1.1, 10);
+            game.vel = v3(0, 0, 0);
+            setStatus('You died (respawn)', true);
+          } else {
+            setStatus('Hit by bot', true);
+          }
+        }
+      } else {
+        b.shootCooldown = 0.18;
+      }
     }
   }
 }
@@ -1122,7 +1313,7 @@ function drawWorld() {
   const aspect = glsys.width / Math.max(1, glsys.height);
   mat4Perspective(proj, (70 * Math.PI) / 180, aspect, 0.05, 120);
 
-  const camPos = v3(game.pos.x, game.pos.y + 1.6, game.pos.z);
+  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
   const fwd = forwardFromYawPitch(game.yaw, game.pitch);
   const camTarget = v3add(camPos, fwd);
   mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
@@ -1149,6 +1340,20 @@ function drawWorld() {
     gl.uniformMatrix4fv(uModel, false, model);
     gl.uniform3f(uColor, color.x, color.y, color.z);
     gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
+  }
+
+  function drawTracer(a, b, color) {
+    const mid = v3scale(v3add(a, b), 0.5);
+    const d = v3sub(b, a);
+    const len = v3len(d);
+    if (len < 0.001) return;
+    const f = v3scale(d, 1 / len);
+    const up = v3(0, 1, 0);
+    let r = v3cross(up, f);
+    if (v3len(r) < 0.001) r = v3(1, 0, 0);
+    r = v3norm(r);
+    const u = v3norm(v3cross(f, r));
+    drawOrientedBox(mid, r, u, f, v3(0.009, 0.009, len), color);
   }
 
   for (const b of game.boxes) drawBox(b.pos, b.scale, b.color);
@@ -1321,6 +1526,42 @@ function drawWorld() {
     drawBox(s.pos, v3(0.06, 0.04, 0.1), c);
   }
 
+  for (const t of game.tracers) {
+    const k = clamp01(t.life / 0.32);
+    const hue = t.hue || 0.55;
+    const baseCol =
+      hue < 0.1
+        ? v3(1.0 * k, 0.25 + 0.25 * k, 0.22)
+        : v3(0.25 + 0.7 * k, 0.9 * k, 1.0 * k);
+
+    const travel = clamp01(t.travel || 0);
+    const segLen = 1.4;
+    const dir = v3sub(t.b, t.a);
+    const L = v3len(dir);
+    if (L > 0.001) {
+      const f = v3scale(dir, 1 / L);
+      const tip = v3add(t.a, v3scale(f, L * travel));
+      const tail = v3add(tip, v3scale(f, -Math.min(segLen, L * travel)));
+      drawTracer(tail, tip, baseCol);
+
+      if ((t.hue || 0.55) >= 0.1) {
+        gl.disable(gl.CULL_FACE);
+        gl.disable(gl.DEPTH_TEST);
+        const glow = v3(baseCol.x * 0.6, baseCol.y * 0.6, baseCol.z * 0.6);
+        drawOrientedBox(
+          v3scale(v3add(tail, tip), 0.5),
+          v3norm(v3cross(v3(0, 1, 0), f)),
+          v3norm(v3cross(f, v3norm(v3cross(v3(0, 1, 0), f)))),
+          f,
+          v3(0.02, 0.02, Math.min(segLen, v3len(v3sub(tip, tail))) * 1.1),
+          glow
+        );
+        gl.enable(gl.DEPTH_TEST);
+        gl.enable(gl.CULL_FACE);
+      }
+    }
+  }
+
   gl.bindVertexArray(null);
 }
 
@@ -1337,6 +1578,8 @@ function frame() {
     updateWeapon(dt);
     updateBots(dt);
     updateShells(dt);
+    updateTracers(dt);
+    updateHitmarker(dt);
   }
 
   if (t - game.lastStatusAt > 2500 && game.pointerLocked) {

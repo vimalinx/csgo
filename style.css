@@ -179,6 +179,8 @@ body {
   height: 22px;
   opacity: 0.9;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+  --ch-gap: 9px;
+  --ch-len: 8px;
 }
 
 .ch {
@@ -186,27 +188,103 @@ body {
   left: 50%;
   top: 50%;
   width: 2px;
-  height: 8px;
-  background: rgba(232, 238, 252, 0.92);
+  height: var(--ch-len);
+  background: var(--ch-color, rgba(232, 238, 252, 0.92));
   transform: translate(-50%, -50%);
 }
 
+.hitmarker {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%) scale(0.85);
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.35));
+}
+
+.hitmarker.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  transition: opacity 80ms linear, transform 80ms linear;
+}
+
+.hm {
+  position: absolute;
+  width: 2px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  left: 50%;
+  top: 50%;
+  transform-origin: 50% 100%;
+}
+
+.hitmarker.head .hm {
+  background: rgba(255, 77, 109, 0.95);
+}
+
+.hm--tl {
+  transform: translate(-50%, -50%) rotate(225deg) translateY(10px);
+}
+
+.hm--tr {
+  transform: translate(-50%, -50%) rotate(135deg) translateY(10px);
+}
+
+.hm--bl {
+  transform: translate(-50%, -50%) rotate(315deg) translateY(10px);
+}
+
+.hm--br {
+  transform: translate(-50%, -50%) rotate(45deg) translateY(10px);
+}
+
+.reload {
+  display: none;
+  gap: 6px;
+}
+
+.reload.show {
+  display: grid;
+}
+
+.reload__track {
+  width: 220px;
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(232, 238, 252, 0.12);
+  overflow: hidden;
+}
+
+.reload__fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(109, 230, 255, 1), rgba(153, 110, 255, 1));
+}
+
+.reload__text {
+  font-size: 12px;
+  color: rgba(232, 238, 252, 0.75);
+}
+
 .ch--up {
-  transform: translate(-50%, -50%) translateY(-9px);
+  transform: translate(-50%, -50%) translateY(calc(-1 * var(--ch-gap)));
 }
 
 .ch--down {
-  transform: translate(-50%, -50%) translateY(9px);
+  transform: translate(-50%, -50%) translateY(var(--ch-gap));
 }
 
 .ch--left {
   width: 8px;
   height: 2px;
-  transform: translate(-50%, -50%) translateX(-9px);
+  transform: translate(-50%, -50%) translateX(calc(-1 * var(--ch-gap)));
 }
 
 .ch--right {
   width: 8px;
   height: 2px;
-  transform: translate(-50%, -50%) translateX(9px);
+  transform: translate(-50%, -50%) translateX(var(--ch-gap));
 }
