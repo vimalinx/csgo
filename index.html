@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HTML5 WebGL FPS Demo (CS-like)</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="overlay" class="overlay">
+      <div class="panel">
+        <h1>HTML5 WebGL FPS Demo</h1>
+        <p>
+          这是一个<strong>纯 HTML5 + 原生 JS + WebGL2</strong> 实现的 3D 第一人称射击演示（不使用任何外部库）。
+          目标是给你一个可运行、可扩展的“CS 风格”基础：鼠标锁定、移动跳跃、碰撞、地图、武器、命中与 HUD。
+        </p>
+        <ul>
+          <li>点击页面进入游戏（Pointer Lock）</li>
+          <li>W/A/S/D 移动，Space 跳跃，Shift 冲刺，R 换弹</li>
+          <li>1/2 切换武器，鼠标左键射击，Esc 退出指针锁定</li>
+        </ul>
+        <p class="small">
+          注意：这不是商业游戏《CS:GO》的完整复刻（完整地图/枪械/网络/动画/音效/经济系统等规模巨大且含版权）。
+          但它是一个完整可玩的 3D FPS 单机 Demo，可以持续迭代。
+        </p>
+        <button id="startBtn" class="btn">开始</button>
+      </div>
+    </div>
+
+    <canvas id="gl"></canvas>
+
+    <div id="hud" class="hud" aria-hidden="true">
+      <div class="hud__top">
+        <div id="status" class="status"></div>
+      </div>
+      <div class="hud__bottom">
+        <div class="hud__left">
+          <div class="bar">
+            <span>HP</span>
+            <div class="bar__track"><div id="hpBar" class="bar__fill"></div></div>
+            <span id="hpText">100</span>
+          </div>
+          <div class="bar">
+            <span>AR</span>
+            <div class="bar__track"><div id="arBar" class="bar__fill bar__fill--alt"></div></div>
+            <span id="arText">0</span>
+          </div>
+        </div>
+        <div class="hud__center">
+          <div class="crosshair" aria-hidden="true">
+            <div class="ch ch--up"></div>
+            <div class="ch ch--down"></div>
+            <div class="ch ch--left"></div>
+            <div class="ch ch--right"></div>
+          </div>
+        </div>
+        <div class="hud__right">
+          <div id="weaponName" class="weapon">Pistol</div>
+          <div class="ammo"><span id="ammoText">12 / 36</span></div>
+          <div class="small" id="tipText"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
