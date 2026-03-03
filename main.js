@@ -1202,16 +1202,16 @@ class Game {
     this.targets.length = 0;
     this.bots.length = 0;
 
-    // 增强颜色对比度，提高视觉层次感
-    const groundBaseColor = v3(0.42, 0.34, 0.26);  // 棕色基础地面（更有质感）
-    const groundCenterColor = v3(0.45, 0.50, 0.55);  // 中间通道（冷色调，灰蓝色）
-    const groundNorthColor = v3(0.55, 0.42, 0.30);  // 北区（暖色调，棕色）
-    const groundSouthColor = v3(0.35, 0.48, 0.35);  // 南区（绿色调，草地）
-    const perimeterWallColor = v3(0.38, 0.48, 0.62);  // 周边墙（蓝色调）
-    const structureWallColor = v3(0.62, 0.54, 0.42);  // 结构墙（浅棕色）
-    const coverColor = v3(0.35, 0.55, 0.38);  // 掩体（深绿色）
-    const buildingColor = v3(0.78, 0.52, 0.35);  // 建筑（橙棕色）
-    const buildingHighlightColor = v3(0.88, 0.62, 0.42);  // 建筑高光面
+    // 增强颜色对比度，提高视觉层次感 - 更鲜明的配色方案
+    const groundBaseColor = v3(0.48, 0.38, 0.28);  // 棕色基础地面（更有质感）
+    const groundCenterColor = v3(0.50, 0.55, 0.62);  // 中间通道（冷色调，灰蓝色）
+    const groundNorthColor = v3(0.62, 0.46, 0.32);  // 北区（暖色调，棕色）
+    const groundSouthColor = v3(0.40, 0.55, 0.40);  // 南区（绿色调，草地）
+    const perimeterWallColor = v3(0.42, 0.52, 0.68);  // 周边墙（蓝色调）
+    const structureWallColor = v3(0.68, 0.58, 0.44);  // 结构墙（浅棕色）
+    const coverColor = v3(0.38, 0.60, 0.42);  // 掩体（深绿色）
+    const buildingColor = v3(0.82, 0.55, 0.36);  // 建筑（橙棕色）
+    const buildingHighlightColor = v3(0.92, 0.66, 0.45);  // 建筑高光面
 
     this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), groundBaseColor, true));
     this.boxes.push(makeBox(v3(0, 0.02, 0), v3(22, 0.04, 56), groundCenterColor, false));
@@ -2169,26 +2169,26 @@ void main() {
   vec3 lightDir = normalize(-uLightDir);
 
   // 环境光（降低，增加暗部深度）
-  float ambient = 0.25;
+  float ambient = 0.22;
 
   // 漫反射光（增强对比度，亮部更亮）
   float ndl = clamp(dot(n, lightDir), 0.0, 1.0);
-  float diffuse = ndl * 0.85;
+  float diffuse = ndl * 0.92;
 
   // 高度照明（高处更亮，增强对比度）
   float heightLight = clamp((worldPos.y + 0.8) / 10.0, 0.0, 1.0);
-  float heightFactor = mix(0.70, 1.40, heightLight);
+  float heightFactor = mix(0.65, 1.50, heightLight);
 
   // 环境光遮蔽（AO）模拟 - 低处和角落更暗（增强）
   float ao = 1.0;
   if (worldPos.y < 0.5) {
-    ao = mix(0.55, 1.0, clamp(worldPos.y / 0.5, 0.0, 1.0));
+    ao = mix(0.50, 1.0, clamp(worldPos.y / 0.5, 0.0, 1.0));
   }
 
   // 边缘光照（rim lighting）- 增强效果
   vec3 viewDir = normalize(uViewPos - worldPos.xyz);
   float rim = 1.0 - clamp(dot(viewDir, n), 0.0, 1.0);
-  rim = pow(rim, 3.0) * 0.25;
+  rim = pow(rim, 3.0) * 0.30;
 
   // 最终光照
   float lit = (ambient + diffuse + rim) * heightFactor * ao;
@@ -2232,12 +2232,12 @@ void main() {
 
     // 建筑物1的阴影（向光方向延伸）- 增强阴影强度
     if (length(shadowPos1) < 8.0) {
-      buildingShadow = 0.45 * (1.0 - length(shadowPos1) / 8.0);
+      buildingShadow = 0.50 * (1.0 - length(shadowPos1) / 8.0);
     }
 
     // 建筑物2的阴影 - 增强阴影强度
     if (length(shadowPos2) < 8.0) {
-      buildingShadow = max(buildingShadow, 0.45 * (1.0 - length(shadowPos2) / 8.0));
+      buildingShadow = max(buildingShadow, 0.50 * (1.0 - length(shadowPos2) / 8.0));
     }
 
     fakeShadow = buildingShadow;
@@ -2250,35 +2250,35 @@ void main() {
   if (vWorldPos.y < 0.1) {
     // 距离衰减 - 远处略暗（增强对比度）
     float dist = length(vWorldPos.xz);
-    float distFade = 1.0 - clamp(dist / 60.0, 0.0, 0.35);
-    color *= mix(0.70, 1.0, distFade);
+    float distFade = 1.0 - clamp(dist / 60.0, 0.0, 0.38);
+    color *= mix(0.65, 1.0, distFade);
 
     // 地面纹理模拟（基于位置的明暗变化）- 增强纹理
     float pattern = sin(vWorldPos.x * 0.5) * sin(vWorldPos.z * 0.5);
-    color *= 1.0 + pattern * 0.08;
+    color *= 1.0 + pattern * 0.10;
 
     // 增加随机纹理变化
     float noise = fract(sin(dot(vWorldPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
-    color *= 0.95 + noise * 0.10;
+    color *= 0.92 + noise * 0.12;
   }
 
   // 雾效（基于距离的线性雾）- 使用更鲜明的颜色
-  vec3 fogColor = vec3(0.63, 0.78, 0.88);
-  float fogDensity = 0.015;
+  vec3 fogColor = vec3(0.65, 0.80, 0.90);
+  float fogDensity = 0.012;
   float dist = length(vWorldPos - uViewPos);
   float fogFactor = 1.0 - exp(-fogDensity * dist);
-  fogFactor = clamp(fogFactor, 0.0, 0.6);  // 限制雾的最大强度
+  fogFactor = clamp(fogFactor, 0.0, 0.55);  // 限制雾的最大强度
 
   // 混合雾效
   color = mix(color, fogColor, fogFactor);
 
   // 饱和度增强（提高色彩鲜艳度）
   float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-  float saturation = 1.25;  // 饱和度倍率（1.0 = 原始，>1.0 = 增强）
+  float saturation = 1.30;  // 饱和度倍率（1.0 = 原始，>1.0 = 增强）
   color = mix(vec3(luminance), color, saturation);
 
   // 对比度增强（亮部更亮，暗部更暗）
-  color = (color - 0.5) * 1.15 + 0.5;  // 对比度倍率 1.15
+  color = (color - 0.5) * 1.20 + 0.5;  // 对比度倍率 1.20
 
   fragColor = vec4(color, 1.0);
 }
@@ -3760,16 +3760,16 @@ function drawWorld() {
 
   const tSky = nowMs() * 0.00005;
   // 更鲜明的天蓝色天空
-  const skyA = v3(0.53, 0.81, 0.92);  // 天蓝色
-  const skyB = v3(0.68, 0.88, 0.96);  // 浅天蓝色
+  const skyA = v3(0.55, 0.82, 0.94);  // 天蓝色
+  const skyB = v3(0.70, 0.89, 0.97);  // 浅天蓝色
   gl.clearColor(lerp(skyA.x, skyB.x, 0.7), lerp(skyA.y, skyB.y, 0.7), lerp(skyA.z, skyB.z, 0.7), 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.useProgram(program);
 
   // 启用雾效（通过多边形偏移实现简单的距离雾）
   // 注意：WebGL2 没有固定管线的雾效，这里通过清除颜色模拟
-  const fogColor = v3(0.63, 0.78, 0.88);  // 雾的颜色（天蓝色调）
-  const fogDensity = 0.015;  // 雾的密度
+  const fogColor = v3(0.65, 0.80, 0.90);  // 雾的颜色（天蓝色调）
+  const fogDensity = 0.012;  // 雾的密度
 
   gl.uniformMatrix4fv(uProj, false, proj);
   gl.uniformMatrix4fv(uView, false, view);
@@ -3838,14 +3838,14 @@ function drawWorld() {
     for (const site of game.round.sites) {
       const active = site.key === game.round.activeSite;
       const plantedHere = site.key === game.round.plantSite;
-      const neutral = v3(0.9, 0.92, 0.98);
-      const activeCol = site.key === 'A' ? v3(0.58, 0.72, 1.0) : v3(0.92, 0.78, 0.52);
-      const plantedCol = v3(1.0, 0.58, 0.45);
+      const neutral = v3(0.92, 0.94, 0.98);
+      const activeCol = site.key === 'A' ? v3(0.60, 0.75, 1.0) : v3(0.95, 0.80, 0.55);
+      const plantedCol = v3(1.0, 0.55, 0.40);
       const padCol = plantedHere ? plantedCol : active ? activeCol : neutral;
       drawBox(v3(site.pos.x, site.pos.y, site.pos.z), v3(1.8, 0.06, 1.8), padCol);
     }
     if (planted) {
-      drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), v3(1.0, 0.35, 0.25));
+      drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), v3(1.0, 0.30, 0.20));
     }
   }
 
@@ -3894,30 +3894,30 @@ function drawWorld() {
     const pal =
       bot.team === 'ct'
         ? {
-            body: v3(0.2, 0.34, 0.75),
-            hurt: v3(0.95, 0.2, 0.22),
-            head: v3(0.14, 0.18, 0.28),
-            arm: v3(0.18, 0.26, 0.58),
-            leg: v3(0.14, 0.2, 0.42),
+            body: v3(0.22, 0.38, 0.78),
+            hurt: v3(0.95, 0.22, 0.24),
+            head: v3(0.15, 0.20, 0.30),
+            arm: v3(0.20, 0.30, 0.62),
+            leg: v3(0.16, 0.22, 0.45),
             gun: v3(0.12, 0.12, 0.14),
           }
         : {
-            body: v3(0.78, 0.62, 0.16),
-            hurt: v3(0.95, 0.2, 0.22),
-            head: v3(0.28, 0.22, 0.1),
-            arm: v3(0.58, 0.46, 0.12),
-            leg: v3(0.42, 0.34, 0.1),
+            body: v3(0.80, 0.65, 0.18),
+            hurt: v3(0.95, 0.22, 0.24),
+            head: v3(0.30, 0.24, 0.12),
+            arm: v3(0.60, 0.48, 0.14),
+            leg: v3(0.44, 0.36, 0.12),
             gun: v3(0.12, 0.12, 0.14),
           };
     drawHumanoid(bot.pos, bot.yaw, bot.hp, bot.maxHp, pal);
   }
 
   const playerPalette = {
-    body: v3(0.22, 0.22, 0.4),
-    hurt: v3(0.95, 0.2, 0.22),
-    head: v3(0.16, 0.18, 0.2),
-    arm: v3(0.2, 0.2, 0.35),
-    leg: v3(0.16, 0.16, 0.28),
+    body: v3(0.24, 0.24, 0.42),
+    hurt: v3(0.95, 0.22, 0.24),
+    head: v3(0.18, 0.20, 0.22),
+    arm: v3(0.22, 0.22, 0.38),
+    leg: v3(0.18, 0.18, 0.30),
     gun: v3(0.12, 0.12, 0.14),
   };
 
@@ -4069,8 +4069,8 @@ function drawWorld() {
     const hue = t.hue || 0.55;
     const baseCol =
       hue < 0.1
-        ? v3(1.0 * k, 0.25 + 0.25 * k, 0.22)
-        : v3(0.25 + 0.7 * k, 0.9 * k, 1.0 * k);
+        ? v3(1.0 * k, 0.28 + 0.28 * k, 0.24)
+        : v3(0.28 + 0.72 * k, 0.92 * k, 1.0 * k);
 
     const travel = clamp01(t.travel || 0);
     const segLen = 1.4;
