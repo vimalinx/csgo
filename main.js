@@ -767,6 +767,7 @@ const WEAPON_DEFS = [
     rpm: 600,
     damage: 36,
     spreadDeg: 2.6,
+    spreadMultiplier: 1.2,
     recoil: 1.05,
     accuracy: 72,
     magSize: 30,
@@ -786,6 +787,7 @@ const WEAPON_DEFS = [
     rpm: 640,
     damage: 32,
     spreadDeg: 2.2,
+    spreadMultiplier: 1.0,
     recoil: 0.92,
     accuracy: 78,
     magSize: 25,
@@ -805,6 +807,7 @@ const WEAPON_DEFS = [
     rpm: 670,
     damage: 30,
     spreadDeg: 2.4,
+    spreadMultiplier: 1.1,
     recoil: 0.96,
     accuracy: 75,
     magSize: 25,
@@ -824,6 +827,7 @@ const WEAPON_DEFS = [
     rpm: 760,
     damage: 26,
     spreadDeg: 2.8,
+    spreadMultiplier: 0.9,
     recoil: 0.88,
     accuracy: 68,
     magSize: 30,
@@ -843,6 +847,7 @@ const WEAPON_DEFS = [
     rpm: 880,
     damage: 22,
     spreadDeg: 3.4,
+    spreadMultiplier: 0.9,
     recoil: 0.82,
     accuracy: 63,
     magSize: 50,
@@ -862,6 +867,7 @@ const WEAPON_DEFS = [
     rpm: 52,
     damage: 115,
     spreadDeg: 0.28,
+    spreadMultiplier: 2.5,
     recoil: 1.6,
     accuracy: 96,
     magSize: 10,
@@ -882,6 +888,7 @@ const WEAPON_DEFS = [
     rpm: 78,
     damage: 75,
     spreadDeg: 0.42,
+    spreadMultiplier: 2.0,
     recoil: 1.2,
     accuracy: 90,
     magSize: 10,
@@ -1190,15 +1197,15 @@ class Game {
     this.bots.length = 0;
 
     // 增强颜色对比度，提高视觉层次感
-    const groundBaseColor = v3(0.08, 0.10, 0.14);  // 深色基础地面
-    const groundCenterColor = v3(0.12, 0.18, 0.28);  // 中间通道（冷色调）
-    const groundNorthColor = v3(0.22, 0.17, 0.12);  // 北区（暖色调）
-    const groundSouthColor = v3(0.12, 0.20, 0.13);  // 南区（绿色调）
-    const perimeterWallColor = v3(0.14, 0.20, 0.32);  // 周边墙（蓝色调）
-    const structureWallColor = v3(0.28, 0.24, 0.19);  // 结构墙（浅棕色）
-    const coverColor = v3(0.17, 0.32, 0.23);  // 掩体（深绿色）
-    const buildingColor = v3(0.58, 0.35, 0.22);  // 建筑（橙棕色）
-    const buildingHighlightColor = v3(0.68, 0.42, 0.28);  // 建筑高光面
+    const groundBaseColor = v3(0.42, 0.34, 0.26);  // 棕色基础地面（更有质感）
+    const groundCenterColor = v3(0.45, 0.50, 0.55);  // 中间通道（冷色调，灰蓝色）
+    const groundNorthColor = v3(0.55, 0.42, 0.30);  // 北区（暖色调，棕色）
+    const groundSouthColor = v3(0.35, 0.48, 0.35);  // 南区（绿色调，草地）
+    const perimeterWallColor = v3(0.38, 0.48, 0.62);  // 周边墙（蓝色调）
+    const structureWallColor = v3(0.62, 0.54, 0.42);  // 结构墙（浅棕色）
+    const coverColor = v3(0.35, 0.55, 0.38);  // 掩体（深绿色）
+    const buildingColor = v3(0.78, 0.52, 0.35);  // 建筑（橙棕色）
+    const buildingHighlightColor = v3(0.88, 0.62, 0.42);  // 建筑高光面
 
     this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), groundBaseColor, true));
     this.boxes.push(makeBox(v3(0, 0.02, 0), v3(22, 0.04, 56), groundCenterColor, false));
@@ -2152,30 +2159,30 @@ void main() {
   vec4 worldPos = uModel * vec4(aPos, 1.0);
   vec3 n = normalize(mat3(uModel) * aNor);
 
-  // 增强的光照计算
+  // 增强的光照计算 - 提高对比度
   vec3 lightDir = normalize(-uLightDir);
 
-  // 环境光
-  float ambient = 0.35;
+  // 环境光（降低，增加暗部深度）
+  float ambient = 0.25;
 
-  // 漫反射光（增强对比度）
+  // 漫反射光（增强对比度，亮部更亮）
   float ndl = clamp(dot(n, lightDir), 0.0, 1.0);
-  float diffuse = ndl * 0.65;
+  float diffuse = ndl * 0.85;
 
-  // 高度照明（高处更亮）
+  // 高度照明（高处更亮，增强对比度）
   float heightLight = clamp((worldPos.y + 0.8) / 10.0, 0.0, 1.0);
-  float heightFactor = mix(0.85, 1.25, heightLight);
+  float heightFactor = mix(0.70, 1.40, heightLight);
 
-  // 环境光遮蔽（AO）模拟 - 低处和角落更暗
+  // 环境光遮蔽（AO）模拟 - 低处和角落更暗（增强）
   float ao = 1.0;
   if (worldPos.y < 0.5) {
-    ao = mix(0.7, 1.0, clamp(worldPos.y / 0.5, 0.0, 1.0));
+    ao = mix(0.55, 1.0, clamp(worldPos.y / 0.5, 0.0, 1.0));
   }
 
-  // 边缘光照（rim lighting）
+  // 边缘光照（rim lighting）- 增强效果
   vec3 viewDir = normalize(uViewPos - worldPos.xyz);
   float rim = 1.0 - clamp(dot(viewDir, n), 0.0, 1.0);
-  rim = pow(rim, 3.0) * 0.15;
+  rim = pow(rim, 3.0) * 0.25;
 
   // 最终光照
   float lit = (ambient + diffuse + rim) * heightFactor * ao;
@@ -2206,47 +2213,51 @@ out vec4 fragColor;
 void main() {
   vec3 color = vColor;
 
-  // 简化的阴影模拟（基于高度和法线）
+  // 简化的阴影模拟（基于高度和法线）- 增强对比度
   float fakeShadow = 0.0;
   if (vWorldPos.y < 0.1) {
     // 地面阴影 - 根据附近建筑物计算
     // 这里简化处理，基于世界坐标模拟阴影
     float buildingShadow = 0.0;
 
-    // 模拟几个主要建筑物的阴影
+    // 模拟几个主要建筑物的阴影（增强效果）
     vec2 shadowPos1 = vWorldPos.xz - vec2(-20.0, -10.0);
     vec2 shadowPos2 = vWorldPos.xz - vec2(20.0, 10.0);
 
-    // 建筑物1的阴影（向光方向延伸）
+    // 建筑物1的阴影（向光方向延伸）- 增强阴影强度
     if (length(shadowPos1) < 8.0) {
-      buildingShadow = 0.3 * (1.0 - length(shadowPos1) / 8.0);
+      buildingShadow = 0.45 * (1.0 - length(shadowPos1) / 8.0);
     }
 
-    // 建筑物2的阴影
+    // 建筑物2的阴影 - 增强阴影强度
     if (length(shadowPos2) < 8.0) {
-      buildingShadow = max(buildingShadow, 0.3 * (1.0 - length(shadowPos2) / 8.0));
+      buildingShadow = max(buildingShadow, 0.45 * (1.0 - length(shadowPos2) / 8.0));
     }
 
     fakeShadow = buildingShadow;
   }
 
-  // 应用阴影
+  // 应用阴影 - 增强对比度
   color = color * (1.0 - fakeShadow);
 
-  // 地面特殊处理 - 增加层次感
+  // 地面特殊处理 - 增加层次感和纹理
   if (vWorldPos.y < 0.1) {
-    // 距离衰减 - 远处略暗
+    // 距离衰减 - 远处略暗（增强对比度）
     float dist = length(vWorldPos.xz);
-    float distFade = 1.0 - clamp(dist / 60.0, 0.0, 0.25);
-    color *= mix(0.82, 1.0, distFade);
+    float distFade = 1.0 - clamp(dist / 60.0, 0.0, 0.35);
+    color *= mix(0.70, 1.0, distFade);
 
-    // 地面纹理模拟（基于位置的明暗变化）
+    // 地面纹理模拟（基于位置的明暗变化）- 增强纹理
     float pattern = sin(vWorldPos.x * 0.5) * sin(vWorldPos.z * 0.5);
-    color *= 1.0 + pattern * 0.04;
+    color *= 1.0 + pattern * 0.08;
+
+    // 增加随机纹理变化
+    float noise = fract(sin(dot(vWorldPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
+    color *= 0.95 + noise * 0.10;
   }
 
-  // 雾效（基于距离的线性雾）
-  vec3 fogColor = vec3(0.72, 0.78, 0.88);
+  // 雾效（基于距离的线性雾）- 使用更鲜明的颜色
+  vec3 fogColor = vec3(0.63, 0.78, 0.88);
   float fogDensity = 0.015;
   float dist = length(vWorldPos - uViewPos);
   float fogFactor = 1.0 - exp(-fogDensity * dist);
@@ -2254,6 +2265,14 @@ void main() {
 
   // 混合雾效
   color = mix(color, fogColor, fogFactor);
+
+  // 饱和度增强（提高色彩鲜艳度）
+  float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+  float saturation = 1.25;  // 饱和度倍率（1.0 = 原始，>1.0 = 增强）
+  color = mix(vec3(luminance), color, saturation);
+
+  // 对比度增强（亮部更亮，暗部更暗）
+  color = (color - 0.5) * 1.15 + 0.5;  // 对比度倍率 1.15
 
   fragColor = vec4(color, 1.0);
 }
@@ -3734,15 +3753,16 @@ function drawWorld() {
   mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
 
   const tSky = nowMs() * 0.00005;
-  const skyA = v3(0.78, 0.88, 1.0);
-  const skyB = v3(0.92, 0.96, 1.0);
+  // 更鲜明的天蓝色天空
+  const skyA = v3(0.53, 0.81, 0.92);  // 天蓝色
+  const skyB = v3(0.68, 0.88, 0.96);  // 浅天蓝色
   gl.clearColor(lerp(skyA.x, skyB.x, 0.7), lerp(skyA.y, skyB.y, 0.7), lerp(skyA.z, skyB.z, 0.7), 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.useProgram(program);
 
   // 启用雾效（通过多边形偏移实现简单的距离雾）
   // 注意：WebGL2 没有固定管线的雾效，这里通过清除颜色模拟
-  const fogColor = v3(0.72, 0.78, 0.88);  // 雾的颜色
+  const fogColor = v3(0.63, 0.78, 0.88);  // 雾的颜色（天蓝色调）
   const fogDensity = 0.015;  // 雾的密度
 
   gl.uniformMatrix4fv(uProj, false, proj);
