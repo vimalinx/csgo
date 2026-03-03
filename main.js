@@ -1002,6 +1002,14 @@ class Game {
     }
   }
 
+  cycleWeapon(step = 1) {
+    if (this.weapons.length <= 1) return;
+    const len = this.weapons.length;
+    let next = (this.weaponIndex + step) % len;
+    if (next < 0) next += len;
+    this.switchWeapon(next);
+  }
+
   buildMap() {
     this.boxes.length = 0;
     this.colliders.length = 0;
@@ -1214,6 +1222,23 @@ function showScreen(name) {
   if (name === 'settings') screenSettings.classList.remove('hidden');
   if (name === 'result') screenResult.classList.remove('hidden');
   game.uiScreen = name;
+}
+
+function getSwipeScreenOrder() {
+  if (game.uiScreen === 'result') return ['result', 'lobby'];
+  if (game.uiScreen === 'pause') return ['pause', 'settings'];
+  if (game.uiScreen === 'settings' && game.showingSettingsFrom === 'pause') return ['pause', 'settings'];
+  return ['lobby', 'ai', 'settings'];
+}
+
+function swipeToScreen(direction) {
+  const order = getSwipeScreenOrder();
+  const idx = order.indexOf(game.uiScreen);
+  if (idx === -1) return;
+  let next = idx + direction;
+  if (next < 0) next = order.length - 1;
+  if (next >= order.length) next = 0;
+  showScreen(order[next]);
 }
 
 function showResult(title, detail) {
@@ -2154,6 +2179,7 @@ document.addEventListener('keydown', (e) => {
     else game.switchWeaponBySlot('secondary');
   }
   if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
+  if (e.code === 'KeyQ' && game.pointerLocked) game.cycleWeapon(1);
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'KeyG') deploySmokeWall();
   if (e.code === 'KeyF') deployFlashbang();
@@ -2199,6 +2225,11 @@ document.addEventListener('mousedown', (e) => {
   if (e.button === 0) {
     game.mouseDown = true;
     game.firePressed = true;
+    return;
+  }
+  if (e.button === 2) {
+    e.preventDefault();
+    game.cycleWeapon(1);
   }
 });
 
@@ -2210,6 +2241,36 @@ document.addEventListener('contextmenu', (e) => {
   if (!game.pointerLocked) return;
   e.preventDefault();
 });
+
+const SWIPE_MIN_DISTANCE = 56;
+const SWIPE_MAX_VERTICAL_DRIFT = 72;
+let swipeStartX = 0;
+let swipeStartY = 0;
+
+overlay.addEventListener(
+  'touchstart',
+  (e) => {
+    if (game.pointerLocked || !e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    swipeStartX = t.clientX;
+    swipeStartY = t.clientY;
+  },
+  { passive: true }
+);
+
+overlay.addEventListener(
+  'touchend',
+  (e) => {
+    if (game.pointerLocked || !e.changedTouches || e.changedTouches.length !== 1) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipeStartX;
+    const dy = t.clientY - swipeStartY;
+    if (Math.abs(dx) < SWIPE_MIN_DISTANCE) return;
+    if (Math.abs(dy) > SWIPE_MAX_VERTICAL_DRIFT) return;
+    swipeToScreen(dx < 0 ? 1 : -1);
+  },
+  { passive: true }
+);
 
 window.addEventListener('blur', () => {
   game.keys.clear();
