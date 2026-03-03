@@ -293,6 +293,33 @@ class MultiplayerClient {
   }
 
   /**
+   * Set callback for room updates
+   */
+  onRoomUpdate(callback) {
+    if (this.socket) {
+      this.socket.on('roomUpdate', callback)
+    }
+  }
+
+  /**
+   * Set callback for game start
+   */
+  onGameStart(callback) {
+    if (this.socket) {
+      this.socket.on('gameStart', callback)
+    }
+  }
+
+  /**
+   * Start game (host only)
+   */
+  startGame() {
+    if (this.roomId && this.socket && this.isConnected) {
+      this.socket.emit('startGame', { roomId: this.roomId })
+    }
+  }
+
+  /**
    * Set callback for errors
    */
   onError(callback) {

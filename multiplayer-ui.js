@@ -284,7 +284,7 @@ export function createRoomListUI(multiplayer, onJoinRoom, onBack) {
 
   async function handleCreateRoom() {
     const roomName = roomInput.value.trim()
-    
+
     if (!roomName) {
       alert('请输入房间名')
       return
@@ -296,7 +296,8 @@ export function createRoomListUI(multiplayer, onJoinRoom, onBack) {
     try {
       const data = await multiplayer.createRoom(roomName)
       document.body.removeChild(overlay)
-      onJoinRoom(data.roomId, roomName)
+      // Pass true for isHost when creating room
+      onJoinRoom(data.roomId, roomName, true)
     } catch (err) {
       alert(err.message)
       createBtn.disabled = false
@@ -308,7 +309,8 @@ export function createRoomListUI(multiplayer, onJoinRoom, onBack) {
     try {
       await multiplayer.joinRoom(roomId)
       document.body.removeChild(overlay)
-      onJoinRoom(roomId, roomName)
+      // Pass false for isHost when joining room
+      onJoinRoom(roomId, roomName, false)
     } catch (err) {
       alert(err.message)
     }
@@ -431,7 +433,7 @@ export function createMultiplayerHUD(multiplayer) {
 
 function updatePlayerList(container, players) {
   container.innerHTML = ''
-  
+
   if (!players || players.length === 0) {
     container.textContent = '无其他玩家'
     return
@@ -442,5 +444,205 @@ function updatePlayerList(container, players) {
     playerEl.textContent = `• ${player.username}`
     playerEl.style.cssText = 'margin: 3px 0;'
     container.appendChild(playerEl)
+  })
+}
+
+/**
+ * Create room waiting UI
+ */
+export function createRoomWaitingUI(multiplayer, roomInfo, onStartGame, onLeaveRoom) {
+  // Remove old room list overlay
+  const oldOverlay = document.getElementById('roomListOverlay')
+  if (oldOverlay) {
+    oldOverlay.remove()
+  }
+
+  // Create waiting overlay
+  const overlay = document.createElement('div')
+  overlay.id = 'roomWaitingOverlay'
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    color: white;
+    font-family: Arial, sans-serif;
+  `
+
+  // Create container
+  const container = document.createElement('div')
+  container.style.cssText = `
+    background: rgba(30, 30, 30, 0.95);
+    padding: 40px;
+    border-radius: 15px;
+    min-width: 400px;
+    max-width: 600px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  `
+
+  // Room info
+  const roomInfoDiv = document.createElement('div')
+  roomInfoDiv.innerHTML = `
+    <h2 style="margin-top: 0; color: #4CAF50;">🎮 房间等待中</h2>
+    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+      <p style="margin: 5px 0;"><strong>房间名:</strong> ${roomInfo.name}</p>
+      <p style="margin: 5px 0;"><strong>房间 ID:</strong> <span style="font-family: monospace; color: #2196F3;">${roomInfo.id}</span></p>
+      <p style="margin: 5px 0;"><strong>你是房主:</strong> ${roomInfo.isHost ? '✅ 是' : '❌ 否'}</p>
+    </div>
+  `
+
+  // Player list title
+  const playerListTitle = document.createElement('h3')
+  playerListTitle.textContent = '👥 玩家列表'
+  playerListTitle.style.marginTop = '20px'
+
+  // Player list container
+  const playerList = document.createElement('div')
+  playerList.id = 'waitingPlayerList'
+  playerList.style.cssText = `
+    background: rgba(255,255,255,0.05);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    min-height: 100px;
+  `
+
+  // Initial player (just yourself)
+  playerList.innerHTML = `
+    <div style="padding: 10px; background: rgba(76, 175, 80, 0.2); border-radius: 5px; margin-bottom: 10px;">
+      <span style="color: #4CAF50;">👑</span> ${multiplayer.username} (你) ${roomInfo.isHost ? '- 房主' : ''}
+    </div>
+    <div style="text-align: center; color: #888; padding: 20px;">
+      等待其他玩家加入...
+    </div>
+  `
+
+  // Waiting message
+  const waitingMessage = document.createElement('div')
+  waitingMessage.id = 'waitingMessage'
+  waitingMessage.style.cssText = `
+    text-align: center;
+    color: #888;
+    margin-bottom: 20px;
+    font-style: italic;
+  `
+  waitingMessage.textContent = roomInfo.isHost
+    ? '等待玩家加入后，点击"开始游戏"'
+    : '等待房主开始游戏...'
+
+  // Button container
+  const buttonContainer = document.createElement('div')
+  buttonContainer.style.cssText = `
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  `
+
+  // Start game button (only for host)
+  if (roomInfo.isHost) {
+    const startButton = document.createElement('button')
+    startButton.textContent = '🎮 开始游戏'
+    startButton.id = 'startGameButton'
+    startButton.style.cssText = `
+      padding: 12px 30px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s;
+    `
+    startButton.onmouseover = () => startButton.style.background = '#45a049'
+    startButton.onmouseout = () => startButton.style.background = '#4CAF50'
+    startButton.onclick = () => {
+      onStartGame()
+      overlay.remove()
+    }
+    buttonContainer.appendChild(startButton)
+  }
+
+  // Leave room button
+  const leaveButton = document.createElement('button')
+  leaveButton.textContent = '🚪 离开房间'
+  leaveButton.style.cssText = `
+    padding: 12px 30px;
+    font-size: 16px;
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.3s;
+  `
+  leaveButton.onmouseover = () => leaveButton.style.background = '#da190b'
+  leaveButton.onmouseout = () => leaveButton.style.background = '#f44336'
+  leaveButton.onclick = () => {
+    onLeaveRoom()
+    overlay.remove()
+  }
+  buttonContainer.appendChild(leaveButton)
+
+  // Assemble UI
+  container.appendChild(roomInfoDiv)
+  container.appendChild(playerListTitle)
+  container.appendChild(playerList)
+  container.appendChild(waitingMessage)
+  container.appendChild(buttonContainer)
+  overlay.appendChild(container)
+  document.body.appendChild(overlay)
+
+  return overlay
+}
+
+/**
+ * Update waiting room player list
+ */
+export function updateWaitingPlayerList(multiplayer, players) {
+  const playerList = document.getElementById('waitingPlayerList')
+  if (!playerList) return
+
+  if (!Array.isArray(players) || players.length === 0) {
+    playerList.innerHTML = `
+      <div style="text-align: center; color: #888; padding: 20px;">
+        等待其他玩家加入...
+      </div>
+    `
+    return
+  }
+
+  // Clear list
+  playerList.innerHTML = ''
+
+  // Add each player
+  players.forEach((player, index) => {
+    const playerDiv = document.createElement('div')
+    playerDiv.style.cssText = `
+      padding: 10px;
+      background: ${index === 0 ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 255, 255, 0.05)'};
+      border-radius: 5px;
+      margin-bottom: 10px;
+    `
+
+    const isCurrentPlayer = player.id === multiplayer.playerId || player.playerId === multiplayer.playerId
+    const isPlayerHost = index === 0 // First player is host
+
+    playerDiv.innerHTML = `
+      <span style="color: ${isPlayerHost ? '#4CAF50' : '#2196F3'};">
+        ${isPlayerHost ? '👑' : '👤'}
+      </span>
+      ${player.username || 'Unknown'}
+      ${isCurrentPlayer ? '(你)' : ''}
+      ${isPlayerHost ? '- 房主' : ''}
+      ${player.ready ? '✅ 准备' : '⏳ 等待'}
+    `
+
+    playerList.appendChild(playerDiv)
   })
 }

@@ -1,6 +1,6 @@
 // Multiplayer imports
 import MultiplayerClient from './multiplayer.js'
-import { createLoginUI, createRoomListUI, createMultiplayerHUD } from './multiplayer-ui.js'
+import { createLoginUI, createRoomListUI, createMultiplayerHUD, createRoomWaitingUI, updateWaitingPlayerList } from './multiplayer-ui.js'
 
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
@@ -2207,15 +2207,80 @@ async function startOnlineMode() {
     createLoginUI(multiplayer, (username) => {
       console.log(`玩家 ${username} 登录成功`)
       // After login, show room list
-      createRoomListUI(multiplayer, (roomId, roomName) => {
-        console.log(`加入房间: ${roomName} (${roomId})`)
-        // Start multiplayer game
-        startMultiplayerGame(roomId, roomName)
-      }, () => {
-        // Back button pressed
-        multiplayer.disconnect()
-        showScreen('lobby')
-      })
+      createRoomListUI(
+        multiplayer,
+        // Join room callback (now includes isHost parameter)
+        (roomId, roomName, isHost = false) => {
+          console.log(`${isHost ? '创建' : '加入'}房间: ${roomName} (${roomId})`)
+
+          // Show room waiting UI
+          const roomInfo = {
+            id: roomId,
+            name: roomName,
+            isHost: isHost
+          }
+
+          createRoomWaitingUI(
+            multiplayer,
+            roomInfo,
+            // Start game callback
+            () => {
+              console.log('游戏开始!')
+              // If host, notify server to start game
+              if (isHost) {
+                multiplayer.startGame()
+              }
+              startMultiplayerGame(roomId, roomName)
+            },
+            // Leave room callback
+            () => {
+              multiplayer.leaveRoom()
+              showScreen('lobby')
+            }
+          )
+
+          // Listen for player joined
+          multiplayer.onPlayerJoined((data) => {
+            console.log('玩家加入:', data)
+            // Request room update to get latest player list
+            if (data.players) {
+              updateWaitingPlayerList(multiplayer, data.players)
+            }
+          })
+
+          // Listen for player left
+          multiplayer.onPlayerLeft((data) => {
+            console.log('玩家离开:', data)
+            if (data.players) {
+              updateWaitingPlayerList(multiplayer, data.players)
+            }
+          })
+
+          // Listen for room updates
+          multiplayer.onRoomUpdate((data) => {
+            console.log('房间更新:', data)
+            if (data.players) {
+              updateWaitingPlayerList(multiplayer, data.players)
+            }
+          })
+
+          // Listen for game start
+          multiplayer.onGameStart((data) => {
+            console.log('收到游戏开始信号')
+            // Remove waiting UI if still present
+            const waitingOverlay = document.getElementById('roomWaitingOverlay')
+            if (waitingOverlay) {
+              waitingOverlay.remove()
+            }
+            startMultiplayerGame(roomId, roomName)
+          })
+        },
+        // Back callback
+        () => {
+          multiplayer.disconnect()
+          showScreen('lobby')
+        }
+      )
     })
   } catch (error) {
     console.error('连接失败:', error)
@@ -4671,9 +4736,11 @@ function frame() {
   if (game.pointerLocked) {
     updatePlayer(dt);
     updateWeapon(dt);
-    
-    // Send multiplayer movement
-    sendPlayerMovement()
+
+    // Send multiplayer movement only when in online mode
+    if (game.mode === 'online') {
+      sendPlayerMovement()
+    }
   }
 
   if (game.pointerLocked || aiRunning) {
