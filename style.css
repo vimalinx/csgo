@@ -267,8 +267,41 @@ body {
 
 .hud__top {
   padding: 12px;
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
+}
+
+.alive-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.26);
+  color: rgba(232, 238, 252, 0.92);
+  font-size: 12px;
+}
+
+.alive-counter__team {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.alive-counter__team--ct {
+  color: rgba(122, 176, 255, 0.95);
+}
+
+.alive-counter__team--t {
+  color: rgba(255, 187, 97, 0.95);
+}
+
+.alive-counter__sep {
+  color: rgba(232, 238, 252, 0.55);
 }
 
 .status {
@@ -367,6 +400,16 @@ body {
 .weapon {
   font-weight: 750;
   letter-spacing: 0.3px;
+}
+
+.fire-mode-hint {
+  display: inline-block;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 230, 255, 0.32);
+  background: rgba(109, 230, 255, 0.12);
+  color: rgba(232, 238, 252, 0.92);
 }
 
 .ammo {

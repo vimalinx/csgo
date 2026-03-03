@@ -47,11 +47,14 @@ const btnSettingsBack = document.getElementById('btnSettingsBack');
 
 const hud = document.getElementById('hud');
 const statusEl = document.getElementById('status');
+const ctAliveEl = document.getElementById('ctAlive');
+const tAliveEl = document.getElementById('tAlive');
 const hpBar = document.getElementById('hpBar');
 const arBar = document.getElementById('arBar');
 const hpText = document.getElementById('hpText');
 const arText = document.getElementById('arText');
 const weaponNameEl = document.getElementById('weaponName');
+const fireModeHintEl = document.getElementById('fireModeHint');
 const ammoText = document.getElementById('ammoText');
 const tipText = document.getElementById('tipText');
 const hitmarkerEl = document.getElementById('hitmarker');
@@ -1294,6 +1297,12 @@ function updateHud() {
   arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
   const w = game.getWeapon();
   ammoText.textContent = `${w.mag} / ${w.reserve}`;
+  if (fireModeHintEl) {
+    fireModeHintEl.textContent = `[B] ${game.autoFire ? 'AUTO' : 'SEMI'}`;
+  }
+
+  if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
+  if (tAliveEl) tAliveEl.textContent = String(teamAliveCount('t'));
 
   const isReloading = w.reloading;
   reloadWrap.classList.toggle('show', isReloading);
@@ -1415,7 +1424,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyO') tryBuy('smoke');
   if (e.code === 'KeyB') {
     game.autoFire = !game.autoFire;
-    setStatus(`Fire mode: ${game.autoFire ? 'AUTO' : 'SEMI'}`, false);
+    setStatus(`Firing toggled (${game.autoFire ? 'AUTO' : 'SEMI'})`, false);
   }
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });

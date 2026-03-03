@@ -142,6 +142,11 @@
     <div id="hud" class="hud" aria-hidden="true">
       <div class="hud__top">
         <div id="status" class="status"></div>
+        <div id="aliveCounter" class="alive-counter mono" aria-hidden="true">
+          <span class="alive-counter__team alive-counter__team--ct">CT <span id="ctAlive">0</span></span>
+          <span class="alive-counter__sep">:</span>
+          <span class="alive-counter__team alive-counter__team--t">T <span id="tAlive">0</span></span>
+        </div>
         <div id="objective" class="objective" aria-hidden="true">
           <div class="objective__row">
             <div id="objectiveText" class="objective__text">Objective</div>
@@ -180,6 +185,7 @@
         </div>
         <div class="hud__right">
           <div id="weaponName" class="weapon">Pistol</div>
+          <div id="fireModeHint" class="fire-mode-hint mono">[B] AUTO</div>
           <div class="ammo"><span id="ammoText">12 / 36</span></div>
           <div id="reloadWrap" class="reload" aria-hidden="true">
             <div class="reload__track"><div id="reloadBar" class="reload__fill"></div></div>
