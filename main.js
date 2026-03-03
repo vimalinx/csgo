@@ -1529,6 +1529,7 @@ btnResultRestart.addEventListener('click', () => {
 
 function setActiveOption(group, value) {
   for (const [v, el] of Object.entries(group)) {
+    if (!el) continue;
     el.classList.toggle('active', v === value);
   }
 }
@@ -1565,7 +1566,7 @@ diffHard.addEventListener('click', () => setDifficulty('hard'));
 botMinus.addEventListener('click', () => setBotCount(game.botCount - 1));
 botPlus.addEventListener('click', () => setBotCount(game.botCount + 1));
 
-modeBomb.addEventListener('click', () => setMatchMode('bomb'));
+if (modeBomb) modeBomb.addEventListener('click', () => setMatchMode('bomb'));
 
 function setStepValue(textEl, next) {
   textEl.textContent = String(next);
