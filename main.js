@@ -1035,9 +1035,18 @@ class Game {
       rewardLose: 1900,
     };
     this.mapBounds = 27.5;
+    // Spawn zones moved away from buildings to avoid collision
+    // CT building at (-20, -10) has x range -22.5 to -17.5, keep spawns at x <= -24
+    // T building at (20, 10) has x range 17.5 to 22.5, keep spawns at x >= 24
     this.spawnZones = {
-      ct: [v3(-24, 0.0, -18), v3(-24, 0.0, -11), v3(-24, 0.0, -4), v3(-21, 0.0, -15), v3(-21, 0.0, -8), v3(-21, 0.0, -1)],
-      t: [v3(24, 0.0, 18), v3(24, 0.0, 11), v3(24, 0.0, 4), v3(21, 0.0, 15), v3(21, 0.0, 8), v3(21, 0.0, 1)],
+      ct: [
+        v3(-25, 0.0, -20), v3(-25, 0.0, -14), v3(-25, 0.0, -8), v3(-25, 0.0, -2),
+        v3(-24, 0.0, -17), v3(-24, 0.0, -11), v3(-24, 0.0, -5),
+      ],
+      t: [
+        v3(25, 0.0, 20), v3(25, 0.0, 14), v3(25, 0.0, 8), v3(25, 0.0, 2),
+        v3(24, 0.0, 17), v3(24, 0.0, 11), v3(24, 0.0, 5),
+      ],
     };
     this.routeNodes = {
       ct: [v3(-23, 0, -17), v3(-16, 0, -17), v3(-9, 0, -17), v3(-1, 0, -17), v3(8, 0, -17), v3(17, 0, -17), v3(-21, 0, -8), v3(-13, 0, -8), v3(-5, 0, -8), v3(3, 0, -8), v3(11, 0, -8), v3(18, 0, -8), v3(-19, 0, 4), v3(-11, 0, 4), v3(-3, 0, 4), v3(5, 0, 4), v3(12, 0, 4), v3(19, 0, 4), v3(-18, 0, 14), v3(-10, 0, 14), v3(-2, 0, 14), v3(6, 0, 14), v3(14, 0, 14), v3(21, 0, 14)],
@@ -1798,7 +1807,7 @@ function rebuildGameplayColliders() {
   for (const s of game.smoke.active) {
     game.colliders.push(s.aabb);
   }
-  // refreshNavigationGrid(); // TODO: AI寻路功能，暂时禁用
+  buildNavGrid(); // AI寻路：构建导航网格
 }
 
 function isRoundFrozen() {
@@ -2045,12 +2054,38 @@ function updateSmoke(dt) {
   }
 }
 
+function spawnPointCollides(pos) {
+  // Player bounding box (approximate: 0.8m wide, 1.8m tall, 0.8m deep)
+  const playerHalf = v3(0.4, 0.9, 0.4);
+  const playerAABB = aabbFromCenter(v3(pos.x, 1.1, pos.z), playerHalf);
+  
+  // Check against all colliders
+  for (const c of game.colliders) {
+    if (aabbIntersects(playerAABB, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function randomSpawnFromTeam(team) {
   const spots = game.spawnZones[team] || game.spawnZones.ct;
-  const idx = Math.floor(Math.random() * spots.length) % spots.length;
-  const base = spots[idx];
-  const jitter = v3((Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 1.4);
-  return v3add(base, jitter);
+  const maxAttempts = 50;
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const idx = Math.floor(Math.random() * spots.length) % spots.length;
+    const base = spots[idx];
+    const jitter = v3((Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 1.4);
+    const spawnPos = v3add(base, jitter);
+    
+    // Check for collision with buildings/walls
+    if (!spawnPointCollides(spawnPos)) {
+      return spawnPos;
+    }
+  }
+  
+  // Fallback: return center of map if no safe spawn found
+  return v3(0, 0, 0);
 }
 
 function respawnPlayer() {
@@ -3725,6 +3760,210 @@ function updateTargets(dt) {
     tgt.pos.x = lerp(tgt.pos.x, targetX + Math.sin(phase) * 1.5, clamp01(dt * 0.8));
   }
 }
+
+// ==================== A* 寻路系统 ====================
+
+/**
+ * 构建导航网格，标记障碍物
+ */
+function buildNavGrid() {
+  // 重置网格为全 0（可通行）
+  for (let x = 0; x < NAV_GRID_SIZE; x++) {
+    for (let z = 0; z < NAV_GRID_SIZE; z++) {
+      game.grid[x][z] = 0;
+    }
+  }
+
+  // 标记所有 solid boxes 为障碍物
+  for (const box of game.boxes) {
+    if (!box.solid) continue;
+    // 忽略地面和过大的盒子（地图边界）
+    if (box.scale.x > 50 || box.scale.z > 50) continue;
+
+    // 将盒子转换为网格坐标
+    const minX = Math.floor((box.pos.x - box.scale.x / 2 - NAV_GRID_ORIGIN) / NAV_GRID_SIZE * NAV_GRID_SIZE);
+    const maxX = Math.ceil((box.pos.x + box.scale.x / 2 - NAV_GRID_ORIGIN) / NAV_GRID_SIZE * NAV_GRID_SIZE);
+    const minZ = Math.floor((box.pos.z - box.scale.z / 2 - NAV_GRID_ORIGIN) / NAV_GRID_SIZE * NAV_GRID_SIZE);
+    const maxZ = Math.ceil((box.pos.z + box.scale.z / 2 - NAV_GRID_ORIGIN) / NAV_GRID_SIZE * NAV_GRID_SIZE);
+
+    // 标记障碍物（扩展 1 格，给 AI 留出空间）
+    for (let gx = Math.max(0, minX - 1); gx <= Math.min(NAV_GRID_SIZE - 1, maxX + 1); gx++) {
+      for (let gz = Math.max(0, minZ - 1); gz <= Math.min(NAV_GRID_SIZE - 1, maxZ + 1); gz++) {
+        game.grid[gx][gz] = 1; // 1 = 障碍物
+      }
+    }
+  }
+}
+
+/**
+ * 世界坐标转网格坐标
+ */
+function worldToGrid(x, z) {
+  const gx = Math.floor((x - NAV_GRID_ORIGIN) / (game.mapBounds * 2 / NAV_GRID_SIZE));
+  const gz = Math.floor((z - NAV_GRID_ORIGIN) / (game.mapBounds * 2 / NAV_GRID_SIZE));
+  return { x: clamp(gx, 0, NAV_GRID_SIZE - 1), z: clamp(gz, 0, NAV_GRID_SIZE - 1) };
+}
+
+/**
+ * 网格坐标转世界坐标
+ */
+function gridToWorld(gx, gz) {
+  const x = NAV_GRID_ORIGIN + (gx + 0.5) * (game.mapBounds * 2 / NAV_GRID_SIZE);
+  const z = NAV_GRID_ORIGIN + (gz + 0.5) * (game.mapBounds * 2 / NAV_GRID_SIZE);
+  return v3(x, 0, z);
+}
+
+/**
+ * 检查网格点是否可通行
+ */
+function isWalkable(gx, gz) {
+  if (gx < 0 || gx >= NAV_GRID_SIZE || gz < 0 || gz >= NAV_GRID_SIZE) return false;
+  return game.grid[gx][gz] === 0;
+}
+
+/**
+ * A* 启发式函数（曼哈顿距离）
+ */
+function heuristic(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+}
+
+/**
+ * 获取节点的邻居（4方向）
+ */
+function getNeighbors(node) {
+  const neighbors = [];
+  const directions = [
+    { x: 1, z: 0 },
+    { x: -1, z: 0 },
+    { x: 0, z: 1 },
+    { x: 0, z: -1 },
+  ];
+
+  for (const dir of directions) {
+    const neighbor = { x: node.x + dir.x, z: node.z + dir.z };
+    if (isWalkable(neighbor.x, neighbor.z)) {
+      neighbors.push(neighbor);
+    }
+  }
+
+  return neighbors;
+}
+
+/**
+ * A* 寻路算法
+ * @param {Object} start - 起点 {x, z} 世界坐标
+ * @param {Object} end - 终点 {x, z} 世界坐标
+ * @returns {Array} - 路径点数组，如果找不到路径则返回 null
+ */
+function findPath(start, end) {
+  const startGrid = worldToGrid(start.x, start.z);
+  const endGrid = worldToGrid(end.x, end.z);
+
+  // 如果终点不可达，尝试找最近的可通行点
+  if (!isWalkable(endGrid.x, endGrid.z)) {
+    let found = false;
+    for (let r = 1; r < 5 && !found; r++) {
+      for (let dx = -r; dx <= r && !found; dx++) {
+        for (let dz = -r; dz <= r && !found; dz++) {
+          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
+          if (isWalkable(endGrid.x + dx, endGrid.z + dz)) {
+            endGrid.x += dx;
+            endGrid.z += dz;
+            found = true;
+          }
+        }
+      }
+    }
+    if (!found) return null;
+  }
+
+  // A* 算法
+  const openSet = [startGrid];
+  const closedSet = new Set();
+  const cameFrom = new Map();
+
+  const gScore = new Map();
+  const fScore = new Map();
+
+  const key = (n) => `${n.x},${n.z}`;
+  gScore.set(key(startGrid), 0);
+  fScore.set(key(startGrid), heuristic(startGrid, endGrid));
+
+  let iterations = 0;
+  const maxIterations = 1000; // 防止无限循环
+
+  while (openSet.length > 0 && iterations < maxIterations) {
+    iterations++;
+
+    // 找到 fScore 最小的节点
+    let current = openSet[0];
+    let currentKey = key(current);
+    for (const node of openSet) {
+      const nodeKey = key(node);
+      if ((fScore.get(nodeKey) || Infinity) < (fScore.get(currentKey) || Infinity)) {
+        current = node;
+        currentKey = nodeKey;
+      }
+    }
+
+    // 到达终点
+    if (current.x === endGrid.x && current.z === endGrid.z) {
+      // 重建路径
+      const path = [];
+      let curr = current;
+      while (cameFrom.has(key(curr))) {
+        path.unshift(gridToWorld(curr.x, curr.z));
+        curr = cameFrom.get(key(curr));
+      }
+      return path.length > 0 ? path : [gridToWorld(endGrid.x, endGrid.z)];
+    }
+
+    // 移除当前节点
+    openSet.splice(openSet.indexOf(current), 1);
+    closedSet.add(currentKey);
+
+    // 检查邻居
+    for (const neighbor of getNeighbors(current)) {
+      const neighborKey = key(neighbor);
+      if (closedSet.has(neighborKey)) continue;
+
+      const tentativeGScore = (gScore.get(currentKey) || 0) + 1; // 每步代价为 1
+
+      if (!openSet.some((n) => n.x === neighbor.x && n.z === neighbor.z)) {
+        openSet.push(neighbor);
+      } else if (tentativeGScore >= (gScore.get(neighborKey) || Infinity)) {
+        continue;
+      }
+
+      cameFrom.set(neighborKey, current);
+      gScore.set(neighborKey, tentativeGScore);
+      fScore.set(neighborKey, tentativeGScore + heuristic(neighbor, endGrid));
+    }
+  }
+
+  // 找不到路径
+  return null;
+}
+
+/**
+ * 获取随机巡逻点
+ */
+function getRandomPatrolPoint() {
+  const attempts = 20;
+  for (let i = 0; i < attempts; i++) {
+    const x = (Math.random() - 0.5) * game.mapBounds * 1.6;
+    const z = (Math.random() - 0.5) * game.mapBounds * 1.6;
+    const grid = worldToGrid(x, z);
+    if (isWalkable(grid.x, grid.z)) {
+      return v3(x, 0, z);
+    }
+  }
+  // 默认返回地图中心
+  return v3(0, 0, 0);
+}
+
+// ==================== AI 更新 ====================
 
 function updateBots(dt) {
   if (isRoundFrozen()) return;
