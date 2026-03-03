@@ -2715,6 +2715,57 @@ function updateWeapon(dt) {
     return;
   }
 
+  if (w.def.kind === 4) {
+    if (!game.firePressed) return;
+    if (w.cooldown > 0) return;
+
+    game.firePressed = false;
+    w.cooldown = 0.5;
+
+    const roKnife = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+    const rdKnife = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
+    const maxKnifeDist = 2.0;
+    let nearestBlock = maxKnifeDist;
+    for (const c of game.colliders) {
+      const t = rayAabb(roKnife, rdKnife, c);
+      if (t !== null && t > 0 && t < nearestBlock) nearestBlock = t;
+    }
+
+    let knifeTarget = null;
+    let knifeBestT = Math.min(maxKnifeDist, nearestBlock);
+    for (const bot of game.bots) {
+      if (!bot.alive) continue;
+      if (bot.team === game.team) continue;
+      const center = v3(bot.pos.x, bot.pos.y + bot.half.y, bot.pos.z);
+      const aabb = aabbFromCenter(center, bot.half);
+      const t = rayAabb(roKnife, rdKnife, aabb);
+      if (t === null || t <= 0 || t > knifeBestT) continue;
+      knifeBestT = t;
+      knifeTarget = bot;
+    }
+
+    if (!knifeTarget) {
+      setStatus('Miss', false);
+      return;
+    }
+
+    knifeTarget.hp -= 50;
+    audio.hit();
+    game.lastStatusAt = nowMs();
+    game.hitmarker.t = 0.12;
+    game.hitmarker.head = false;
+    if (knifeTarget.hp <= 0) {
+      knifeTarget.alive = false;
+      knifeTarget.respawnAt = nowMs() + 2500;
+      setStatus('Bot down', false);
+      game.stats.kills += 1;
+      addMoney(game.econ.rewardKill);
+    } else {
+      setStatus('Hit: -50', false);
+    }
+    return;
+  }
+
   const fireHeld = game.mouseDown && game.pointerLocked;
   const wantsFire = game.fireModeAuto ? fireHeld || game.firePressed : game.firePressed;
   if (!wantsFire) return;
