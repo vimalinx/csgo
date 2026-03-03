@@ -656,6 +656,19 @@ class Game {
     this.score = { ct: 0, t: 0, limit: 25 };
     this.ending = false;
     this.stats = { kills: 0, deaths: 0 };
+    this.playerAlive = true;
+    this.econ = {
+      money: 800,
+      maxMoney: 16000,
+      rewardKill: 300,
+      rewardWin: 3250,
+      rewardLose: 1900,
+      buy: {
+        armor: 650,
+        rifle: 2700,
+        smoke: 300,
+      },
+    };
     this.mapBounds = 27.5;
     this.spawnZones = {
       ct: [v3(-23, 0.0, -14), v3(-23, 0.0, -6), v3(-23, 0.0, 2), v3(-23, 0.0, 10), v3(-19, 0.0, -10), v3(-19, 0.0, 6)],
@@ -669,6 +682,8 @@ class Game {
       cooldown: 0,
       cooldownTotal: 16,
       duration: 8,
+      charges: 0,
+      maxCharges: 2,
       active: [],
       chokePoints: [
         { id: 'midN', pos: v3(0, 0.9, -12), scale: v3(2.6, 1.8, 3.2) },
@@ -688,6 +703,12 @@ class Game {
       bombPlanted: false,
       bombTimer: 0,
       bombTotal: 35,
+      roundTotal: 95,
+      roundLeft: 95,
+      freezeTotal: 8,
+      freezeLeft: 8,
+      postTotal: 4,
+      postLeft: 0,
       bombPos: v3(10, 0.05, -13),
       sitePos: v3(10, 0.05, -13),
       siteRadius: 2.8,
@@ -697,6 +718,9 @@ class Game {
       ],
       activeSite: '',
       plantSite: '',
+      winner: '',
+      reason: '',
+      roundNum: 0,
     };
     this.showingSettingsFrom = 'lobby';
     this.lastStatusAt = 0;
@@ -851,6 +875,144 @@ function rebuildGameplayColliders() {
   }
 }
 
+function isRoundFrozen() {
+  return game.matchMode === 'bomb' && game.round.state === 'freeze';
+}
+
+function addMoney(amount) {
+  game.econ.money = clamp(Math.floor(game.econ.money + amount), 0, game.econ.maxMoney);
+}
+
+function spendMoney(cost) {
+  if (game.econ.money < cost) return false;
+  game.econ.money -= cost;
+  return true;
+}
+
+function teamAliveCount(team) {
+  let alive = team === game.team && game.playerAlive ? 1 : 0;
+  for (const b of game.bots) {
+    if (b.alive && b.team === team) alive += 1;
+  }
+  return alive;
+}
+
+function roundAward(winnerTeam) {
+  const myTeam = game.team;
+  if (winnerTeam === myTeam) addMoney(game.econ.rewardWin);
+  else addMoney(game.econ.rewardLose);
+}
+
+function resetRoundEntities() {
+  respawnPlayer();
+  game.playerAlive = true;
+  for (const b of game.bots) {
+    const spawn = randomSpawnFromTeam(b.team);
+    b.spawn = v3(spawn.x, spawn.y, spawn.z);
+    b.pos = v3(spawn.x, spawn.y, spawn.z);
+    b.vel = v3(0, 0, 0);
+    b.alive = true;
+    b.hp = b.maxHp;
+    b.objectiveSite = Math.random() < 0.5 ? 'A' : 'B';
+    b.weapon.mag = b.weapon.magSize;
+    b.weapon.reserve = 999;
+    b.weapon.reloading = false;
+    b.weapon.reloadLeft = 0;
+    b.shootCooldown = 0;
+  }
+}
+
+function prepareNewBombRound() {
+  game.round.roundNum += 1;
+  game.round.state = 'freeze';
+  game.round.freezeLeft = game.round.freezeTotal;
+  game.round.roundLeft = game.round.roundTotal;
+  game.round.postLeft = 0;
+  game.round.winner = '';
+  game.round.reason = '';
+  game.round.bombPlanted = false;
+  game.round.bombTimer = 0;
+  game.round.tPlanting = false;
+  game.round.ctDefusing = false;
+  game.round.progress = 0;
+  game.round.plantLeft = 0;
+  game.round.defuseLeft = 0;
+  game.round.activeSite = Math.random() < 0.5 ? 'A' : 'B';
+  game.round.plantSite = '';
+  const site = getSiteByKey(game.round.activeSite) || getSiteByKey('A');
+  if (site) {
+    setRoundSite(site);
+    game.round.bombPos = v3(site.pos.x, site.pos.y, site.pos.z);
+  }
+  game.smoke.active = [];
+  game.smoke.cooldown = 0;
+  game.smoke.charges = 1;
+  rebuildGameplayColliders();
+  resetRoundEntities();
+}
+
+function endBombRound(winnerTeam, reason) {
+  if (game.round.state === 'post') return;
+  game.round.winner = winnerTeam;
+  game.round.reason = reason;
+  game.round.state = 'post';
+  game.round.postLeft = game.round.postTotal;
+  if (winnerTeam === 'ct') game.score.ct += 1;
+  else game.score.t += 1;
+  roundAward(winnerTeam);
+  setStatus(`${winnerTeam.toUpperCase()} win: ${reason}`, false);
+}
+
+function tryBuy(item) {
+  if (!(game.matchMode === 'bomb' && game.round.state === 'freeze')) {
+    setStatus('Buy only during freeze', true);
+    return;
+  }
+  if (!game.playerAlive) {
+    setStatus('Cannot buy while dead', true);
+    return;
+  }
+  if (item === 'armor') {
+    if (game.armor >= 100) {
+      setStatus('Armor full', true);
+      return;
+    }
+    if (!spendMoney(game.econ.buy.armor)) {
+      setStatus('Not enough money', true);
+      return;
+    }
+    game.armor = 100;
+    setStatus(`Bought armor ($${game.econ.buy.armor})`, false);
+    return;
+  }
+  if (item === 'rifle') {
+    if (!spendMoney(game.econ.buy.rifle)) {
+      setStatus('Not enough money', true);
+      return;
+    }
+    game.weaponIndex = 1;
+    const w = game.getWeapon();
+    w.mag = w.def.magSize;
+    w.reserve = w.def.reserveMax;
+    weaponNameEl.textContent = w.def.name;
+    tipText.textContent = w.def.tip;
+    setStatus(`Bought rifle ($${game.econ.buy.rifle})`, false);
+    return;
+  }
+  if (item === 'smoke') {
+    if (game.smoke.charges >= game.smoke.maxCharges) {
+      setStatus('Smoke full', true);
+      return;
+    }
+    if (!spendMoney(game.econ.buy.smoke)) {
+      setStatus('Not enough money', true);
+      return;
+    }
+    game.smoke.charges += 1;
+    setStatus(`Bought smoke ($${game.econ.buy.smoke})`, false);
+  }
+}
+
 function getSiteByKey(key) {
   if (!key) return game.round.sites[0] || null;
   for (const s of game.round.sites) {
@@ -883,6 +1045,14 @@ function deploySmokeWall() {
     setStatus(`Smoke cooldown ${game.smoke.cooldown.toFixed(1)}s`, true);
     return;
   }
+  if (game.smoke.charges <= 0) {
+    setStatus('No smoke charge', true);
+    return;
+  }
+  if (!game.playerAlive) {
+    setStatus('Cannot use smoke while dead', true);
+    return;
+  }
 
   const p = v3(game.pos.x, 0.9, game.pos.z);
   let best = null;
@@ -912,6 +1082,7 @@ function deploySmokeWall() {
     expiresAt: nowMs() + game.smoke.duration * 1000,
   });
   game.smoke.cooldown = game.smoke.cooldownTotal;
+  game.smoke.charges = Math.max(0, game.smoke.charges - 1);
   rebuildGameplayColliders();
   setStatus(`Smoke deployed: ${best.id}`, false);
 }
@@ -978,6 +1149,7 @@ function rebuildBots(count) {
 
 function startAIMode() {
   game.mode = 'ai';
+  game.playerAlive = true;
   respawnPlayer();
   game.vel = v3(0, 0, 0);
   game.crouchT = 0;
@@ -989,7 +1161,7 @@ function startAIMode() {
   game.score.ct = 0;
   game.score.t = 0;
   game.score.limit = 25;
-  game.round.state = game.matchMode === 'bomb' ? 'running' : 'idle';
+  game.round.state = game.matchMode === 'bomb' ? 'freeze' : 'idle';
   game.round.tPlanting = false;
   game.round.ctDefusing = false;
   game.round.progress = 0;
@@ -997,17 +1169,22 @@ function startAIMode() {
   game.round.defuseLeft = 0;
   game.round.bombPlanted = false;
   game.round.bombTimer = 0;
-  game.round.activeSite = Math.random() < 0.5 ? 'A' : 'B';
-  game.round.plantSite = '';
-  const firstSite = getSiteByKey(game.round.activeSite) || getSiteByKey('A');
-  if (firstSite) {
-    setRoundSite(firstSite);
-    game.round.bombPos = v3(firstSite.pos.x, firstSite.pos.y, firstSite.pos.z);
-  }
+  game.round.roundNum = 0;
+  game.round.winner = '';
+  game.round.reason = '';
+  game.round.postLeft = 0;
+  game.round.freezeLeft = game.round.freezeTotal;
+  game.round.roundLeft = game.round.roundTotal;
   game.smoke.active = [];
   game.smoke.cooldown = 0;
+  game.smoke.charges = 1;
   rebuildGameplayColliders();
   rebuildBots(game.botCount);
+  game.econ.money = 800;
+
+  if (game.matchMode === 'bomb') {
+    prepareNewBombRound();
+  }
 
   for (const ws of game.weapons) {
     ws.mag = ws.def.magSize;
@@ -1154,13 +1331,21 @@ function updateHud() {
   if (showObj) {
     const siteLabel = r.activeSite || 'A/B';
     const plantedLabel = r.plantSite || siteLabel;
-    if (!r.bombPlanted) {
+    if (r.state === 'freeze') {
+      objectiveText.textContent = `Freeze ${r.freezeLeft.toFixed(1)}s  $${game.econ.money}`;
+      objectiveTimer.textContent = `Buy: U armor / I rifle / O smoke`;
+      objectiveFill.style.width = `${clamp01(r.freezeLeft / Math.max(0.1, r.freezeTotal)) * 100}%`;
+    } else if (r.state === 'post') {
+      objectiveText.textContent = `${(r.winner || '').toUpperCase()} win - ${r.reason}`;
+      objectiveTimer.textContent = `Next round ${r.postLeft.toFixed(1)}s`;
+      objectiveFill.style.width = `${clamp01(r.postLeft / Math.max(0.1, r.postTotal)) * 100}%`;
+    } else if (!r.bombPlanted) {
       objectiveText.textContent = game.team === 't' ? `Plant at ${siteLabel} (E hold)` : `Defend site ${siteLabel}`;
-      objectiveTimer.textContent = `SMK ${game.smoke.cooldown.toFixed(1)}s`;
+      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}`;
       objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
     } else {
       objectiveText.textContent = game.team === 'ct' ? `Defuse ${plantedLabel} (E hold)` : `Bomb planted ${plantedLabel}`;
-      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s`;
+      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s  $${game.econ.money}`;
       objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
     }
   }
@@ -1227,6 +1412,9 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Digit2') game.switchWeapon(1);
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'KeyG') deploySmokeWall();
+  if (e.code === 'KeyU') tryBuy('armor');
+  if (e.code === 'KeyI') tryBuy('rifle');
+  if (e.code === 'KeyO') tryBuy('smoke');
   if (e.code === 'KeyB') {
     game.autoFire = !game.autoFire;
     setStatus(`Fire mode: ${game.autoFire ? 'AUTO' : 'SEMI'}`, false);
@@ -1506,6 +1694,9 @@ function rayBlockedBySmoke(ro, rd, maxDist) {
 }
 
 function updateWeapon(dt) {
+  if (!game.playerAlive) return;
+  if (isRoundFrozen()) return;
+
   const w = game.getWeapon();
   if (w.cooldown > 0) w.cooldown = Math.max(0, w.cooldown - dt);
   if (w.kick > 0) w.kick = Math.max(0, w.kick - dt * 4.5);
@@ -1654,7 +1845,7 @@ function updateWeapon(dt) {
       bestTarget.alive = false;
       bestTarget.respawnAt = nowMs() + 2500;
       setStatus('Bot down', false);
-      game.stats.kills += 1;
+      game.stats.kills += 1; if (bestTarget.team !== game.team) addMoney(game.econ.rewardKill);
       if (game.matchMode === 'match') {
         const killedTeam = bestTarget.team;
         const myTeam = game.team;
@@ -1730,6 +1921,30 @@ function updateBombMode(dt) {
   if (!(game.mode === 'ai' && game.matchMode === 'bomb')) return;
   const r = game.round;
 
+  if (r.state === 'freeze') {
+    r.freezeLeft = Math.max(0, r.freezeLeft - dt);
+    if (r.freezeLeft <= 0) {
+      r.state = 'running';
+      setStatus(`Round ${r.roundNum} live`, false);
+    }
+    return;
+  }
+
+  if (r.state === 'post') {
+    r.postLeft = Math.max(0, r.postLeft - dt);
+    if (r.postLeft <= 0) {
+      if (game.score.ct >= game.score.limit || game.score.t >= game.score.limit) {
+        game.ending = true;
+        const winner = game.score.ct >= game.score.limit ? 'CT' : 'T';
+        showResult(`${winner} Victory`, `Final score CT ${game.score.ct} : ${game.score.t} T`);
+        unlockPointer();
+        return;
+      }
+      prepareNewBombRound();
+    }
+    return;
+  }
+
   const fallbackSite =
     getSiteByKey(r.activeSite) ||
     getSiteByKey(r.plantSite) ||
@@ -1754,6 +1969,8 @@ function updateBombMode(dt) {
   const d = v3sub(p, v3(site.x, 0, site.z));
   const inSite = v3len(d) <= liveSite.radius;
   const holdingE = game.keys.has('KeyE');
+
+  r.roundLeft = Math.max(0, r.roundLeft - dt);
 
   if (!r.bombPlanted) {
     if (inSite) {
@@ -1787,26 +2004,23 @@ function updateBombMode(dt) {
       r.progress = Math.max(0, r.progress - dt * 2);
     }
 
-    const aliveT = game.bots.filter((x) => x.alive && x.team === 't').length + (game.team === 't' ? 1 : 0);
-    const aliveCT = game.bots.filter((x) => x.alive && x.team === 'ct').length + (game.team === 'ct' ? 1 : 0);
+    const aliveT = teamAliveCount('t');
+    const aliveCT = teamAliveCount('ct');
     if (aliveT === 0) {
-      game.ending = true;
-      showResult('CT Victory', 'T eliminated before planting');
-      unlockPointer();
-      }
+      endBombRound('ct', 'T eliminated before plant');
+    }
     if (aliveCT === 0) {
-      game.ending = true;
-      showResult('T Victory', 'CT eliminated');
-      unlockPointer();
+      endBombRound('t', 'CT eliminated');
+    }
+    if (r.roundLeft <= 0) {
+      endBombRound('ct', 'Time up before plant');
     }
     return;
   }
 
   r.bombTimer -= dt;
   if (r.bombTimer <= 0) {
-    game.ending = true;
-    showResult('T Victory', 'Bomb exploded');
-    unlockPointer();
+    endBombRound('t', 'Bomb exploded');
     return;
   }
 
@@ -1816,9 +2030,7 @@ function updateBombMode(dt) {
     r.defuseLeft -= dt;
     r.progress = clamp01(1 - r.defuseLeft / 5.0);
     if (r.defuseLeft <= 0) {
-      game.ending = true;
-      showResult('CT Victory', 'Bomb defused');
-      unlockPointer();
+      endBombRound('ct', 'Bomb defused');
       return;
     }
   } else {
@@ -1827,22 +2039,32 @@ function updateBombMode(dt) {
     r.progress = Math.max(0, r.progress - dt * 2);
   }
 
-  const aliveT = game.bots.filter((x) => x.alive && x.team === 't').length + (game.team === 't' ? 1 : 0);
+  const aliveT = teamAliveCount('t');
   if (aliveT === 0) {
-    game.ending = true;
-    showResult('CT Victory', 'T eliminated after planting');
-    unlockPointer();
+    endBombRound('ct', 'T eliminated after plant');
+    return;
   }
 
-  const aliveCT = game.bots.filter((x) => x.alive && x.team === 'ct').length + (game.team === 'ct' ? 1 : 0);
+  const aliveCT = teamAliveCount('ct');
   if (aliveCT === 0) {
-    game.ending = true;
-    showResult('T Victory', 'CT eliminated');
-    unlockPointer();
+    endBombRound('t', 'CT eliminated after plant');
   }
 }
 
 function updatePlayer(dt) {
+  if (!game.playerAlive) {
+    game.vel.x = 0;
+    game.vel.z = 0;
+    return;
+  }
+
+  if (isRoundFrozen()) {
+    game.vel.x = 0;
+    game.vel.z = 0;
+    game.vel.y = 0;
+    return;
+  }
+
   const crouching = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
   const sprint = game.keys.has('AltLeft') || game.keys.has('AltRight');
   const baseSpeed = sprint ? 6.8 : 4.8;
@@ -1927,6 +2149,8 @@ function updateTargets(dt) {
 }
 
 function updateBots(dt) {
+  if (isRoundFrozen()) return;
+
   const tNow = nowMs();
   const playerEye = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
   const aliveBots = game.bots.filter((x) => x.alive);
@@ -1984,7 +2208,7 @@ function updateBots(dt) {
       dist = bestEnemyDist;
     }
 
-    if (game.team !== b.team) {
+    if (game.playerAlive && game.team !== b.team) {
       const dPlayer = v3len(v3sub(playerEye, lookFrom));
       if (dPlayer < dist) {
         targetType = 'player';
@@ -2117,7 +2341,7 @@ function updateBots(dt) {
           }
         }
 
-        if (!blocked && game.team === b.team) {
+        if (!blocked && game.playerAlive && game.team === b.team) {
           const pAabb = playerAabb(game.pos);
           const tHit = rayAabb(muzzle, shotDir, pAabb);
           if (tHit !== null && tHit > 0 && tHit < dist) {
@@ -2141,13 +2365,16 @@ function updateBots(dt) {
             }
             game.hp -= bw.damage;
             if (game.hp <= 0) {
-              game.hp = 100;
-              game.armor = 0;
-              const spawn = randomSpawnFromTeam(game.team);
-              game.pos = v3(spawn.x, 1.1, spawn.z);
+              game.playerAlive = false;
+              game.hp = 0;
               game.vel = v3(0, 0, 0);
-              setStatus('You died (respawn)', true);
+              setStatus('You died', true);
               game.stats.deaths += 1;
+              if (game.matchMode !== 'bomb') {
+                respawnPlayer();
+                game.playerAlive = true;
+                setStatus('You died (respawn)', true);
+              }
             } else {
               setStatus('Hit by bot', true);
             }
