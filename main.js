@@ -672,12 +672,12 @@ class Game {
     };
     this.mapBounds = 27.5;
     this.spawnZones = {
-      ct: [v3(-23, 0.0, -14), v3(-23, 0.0, -6), v3(-23, 0.0, 2), v3(-23, 0.0, 10), v3(-19, 0.0, -10), v3(-19, 0.0, 6)],
-      t: [v3(23, 0.0, -14), v3(23, 0.0, -6), v3(23, 0.0, 2), v3(23, 0.0, 10), v3(19, 0.0, -10), v3(19, 0.0, 6)],
+      ct: [v3(-24, 0.0, -18), v3(-24, 0.0, -11), v3(-24, 0.0, -4), v3(-21, 0.0, -15), v3(-21, 0.0, -8), v3(-21, 0.0, -1)],
+      t: [v3(24, 0.0, 18), v3(24, 0.0, 11), v3(24, 0.0, 4), v3(21, 0.0, 15), v3(21, 0.0, 8), v3(21, 0.0, 1)],
     };
     this.routeNodes = {
-      ct: [v3(-22, 0, -13), v3(-14, 0, -13), v3(-6, 0, -13), v3(2, 0, -13), v3(10, 0, -13), v3(18, 0, -13), v3(-20, 0, -1), v3(-12, 0, -1), v3(-4, 0, -1), v3(0, 0, -1), v3(6, 0, -1), v3(14, 0, -1), v3(-22, 0, 12), v3(-14, 0, 12), v3(-6, 0, 12), v3(2, 0, 12), v3(10, 0, 12), v3(18, 0, 12)],
-      t: [v3(22, 0, -13), v3(14, 0, -13), v3(6, 0, -13), v3(-2, 0, -13), v3(-10, 0, -13), v3(-18, 0, -13), v3(20, 0, -1), v3(12, 0, -1), v3(4, 0, -1), v3(0, 0, -1), v3(-6, 0, -1), v3(-14, 0, -1), v3(22, 0, 12), v3(14, 0, 12), v3(6, 0, 12), v3(-2, 0, 12), v3(-10, 0, 12), v3(-18, 0, 12)],
+      ct: [v3(-23, 0, -17), v3(-16, 0, -17), v3(-9, 0, -17), v3(-1, 0, -17), v3(8, 0, -17), v3(17, 0, -17), v3(-21, 0, -8), v3(-13, 0, -8), v3(-5, 0, -8), v3(3, 0, -8), v3(11, 0, -8), v3(18, 0, -8), v3(-19, 0, 4), v3(-11, 0, 4), v3(-3, 0, 4), v3(5, 0, 4), v3(12, 0, 4), v3(19, 0, 4), v3(-18, 0, 14), v3(-10, 0, 14), v3(-2, 0, 14), v3(6, 0, 14), v3(14, 0, 14), v3(21, 0, 14)],
+      t: [v3(23, 0, 17), v3(16, 0, 17), v3(9, 0, 17), v3(1, 0, 17), v3(-8, 0, 17), v3(-17, 0, 17), v3(21, 0, 8), v3(13, 0, 8), v3(5, 0, 8), v3(-3, 0, 8), v3(-11, 0, 8), v3(-18, 0, 8), v3(19, 0, -4), v3(11, 0, -4), v3(3, 0, -4), v3(-5, 0, -4), v3(-12, 0, -4), v3(-19, 0, -4), v3(18, 0, -14), v3(10, 0, -14), v3(2, 0, -14), v3(-6, 0, -14), v3(-14, 0, -14), v3(-21, 0, -14)],
     };
     this.smoke = {
       cooldown: 0,
@@ -687,11 +687,11 @@ class Game {
       maxCharges: 2,
       active: [],
       chokePoints: [
-        { id: 'midN', pos: v3(0, 0.9, -12), scale: v3(2.6, 1.8, 3.2) },
-        { id: 'midC', pos: v3(0, 0.9, -1), scale: v3(2.6, 1.8, 3.2) },
-        { id: 'midS', pos: v3(0, 0.9, 11), scale: v3(2.6, 1.8, 3.2) },
-        { id: 'Adoor', pos: v3(8, 0.9, -13), scale: v3(2.6, 1.8, 3.2) },
-        { id: 'Bdoor', pos: v3(8, 0.9, 13), scale: v3(2.6, 1.8, 3.2) },
+        { id: 'upperMid', pos: v3(2, 0.9, -10), scale: v3(3.0, 1.8, 3.4) },
+        { id: 'midCross', pos: v3(2, 0.9, 0), scale: v3(3.0, 1.8, 3.4) },
+        { id: 'lowerMid', pos: v3(2, 0.9, 10), scale: v3(3.0, 1.8, 3.4) },
+        { id: 'AEntry', pos: v3(12, 0.9, -14), scale: v3(3.0, 1.8, 3.4) },
+        { id: 'BEntry', pos: v3(12, 0.9, 14), scale: v3(3.0, 1.8, 3.4) },
       ],
     };
     this.round = {
@@ -710,12 +710,12 @@ class Game {
       freezeLeft: 8,
       postTotal: 4,
       postLeft: 0,
-      bombPos: v3(10, 0.05, -13),
-      sitePos: v3(10, 0.05, -13),
+      bombPos: v3(16, 0.05, -14),
+      sitePos: v3(16, 0.05, -14),
       siteRadius: 2.8,
       sites: [
-        { key: 'A', pos: v3(10, 0.05, -13), radius: 2.8 },
-        { key: 'B', pos: v3(10, 0.05, 13), radius: 2.8 },
+        { key: 'A', pos: v3(16, 0.05, -14), radius: 2.8 },
+        { key: 'B', pos: v3(16, 0.05, 14), radius: 2.8 },
       ],
       activeSite: '',
       plantSite: '',
@@ -746,54 +746,55 @@ class Game {
 
     const wallColor = v3(0.18, 0.2, 0.27);
     const coverColor = v3(0.2, 0.23, 0.29);
+    const heavy = v3(0.23, 0.24, 0.31);
+
     this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), v3(0.12, 0.14, 0.18), true));
     this.boxes.push(makeBox(v3(0, 2, -28), v3(56, 6, 1), wallColor, true));
     this.boxes.push(makeBox(v3(0, 2, 28), v3(56, 6, 1), wallColor, true));
     this.boxes.push(makeBox(v3(-28, 2, 0), v3(1, 6, 56), wallColor, true));
     this.boxes.push(makeBox(v3(28, 2, 0), v3(1, 6, 56), wallColor, true));
 
-    this.boxes.push(makeBox(v3(0, 1.5, -19), v3(2.4, 3, 9.5), wallColor, true));
-    this.boxes.push(makeBox(v3(0, 1.5, -7), v3(2.4, 3, 6), wallColor, true));
-    this.boxes.push(makeBox(v3(0, 1.5, 6), v3(2.4, 3, 6), wallColor, true));
-    this.boxes.push(makeBox(v3(0, 1.5, 18), v3(2.4, 3, 10), wallColor, true));
+    this.boxes.push(makeBox(v3(-20, 1.6, -10), v3(5.0, 3.2, 18), heavy, true));
+    this.boxes.push(makeBox(v3(20, 1.6, 10), v3(5.0, 3.2, 18), heavy, true));
 
-    this.boxes.push(makeBox(v3(-13, 1.2, -16), v3(6, 2.4, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(13, 1.2, -16), v3(6, 2.4, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(-7, 1.0, -11), v3(4, 2, 2.6), coverColor, true));
-    this.boxes.push(makeBox(v3(7, 1.0, -11), v3(4, 2, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(-4, 1.5, -20), v3(8, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(8, 1.5, -20), v3(6, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(3, 1.5, -14), v3(2.2, 3, 8), wallColor, true));
+    this.boxes.push(makeBox(v3(11, 1.5, -12), v3(2.2, 3, 6), wallColor, true));
 
-    this.boxes.push(makeBox(v3(-10, 1.0, -1), v3(5, 2, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(10, 1.0, -1), v3(5, 2, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(-4, 0.9, 4), v3(3.4, 1.8, 2.4), coverColor, true));
-    this.boxes.push(makeBox(v3(4, 0.9, 4), v3(3.4, 1.8, 2.4), coverColor, true));
+    this.boxes.push(makeBox(v3(-6, 1.4, -10), v3(4.5, 2.8, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(10, 1.0, -16), v3(4, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(15.5, 1.0, -9), v3(3, 2, 4), coverColor, true));
 
-    this.boxes.push(makeBox(v3(-14, 1.0, 14), v3(6, 2, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(14, 1.0, 14), v3(6, 2, 3), coverColor, true));
-    this.boxes.push(makeBox(v3(-8, 1.2, 18), v3(3, 2.4, 5), coverColor, true));
-    this.boxes.push(makeBox(v3(8, 1.2, 18), v3(3, 2.4, 5), coverColor, true));
+    this.boxes.push(makeBox(v3(-3.5, 1.5, 0), v3(7, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(8, 1.5, 0), v3(6, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(2.2, 1.5, 6.5), v3(2.2, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(9.8, 1.5, -6.5), v3(2.2, 3, 6), wallColor, true));
 
-    this.boxes.push(makeBox(v3(0, 1.2, -1), v3(7.5, 2.4, 4.2), v3(0.24, 0.24, 0.3), true));
-    this.boxes.push(makeBox(v3(-5.3, 0.45, -1), v3(2.6, 0.9, 2.6), coverColor, true));
-    this.boxes.push(makeBox(v3(5.3, 0.45, -1), v3(2.6, 0.9, 2.6), coverColor, true));
-    this.boxes.push(makeBox(v3(7.3, 1.1, -13), v3(3.8, 2.2, 2.6), coverColor, true));
-    this.boxes.push(makeBox(v3(7.3, 1.1, 13), v3(3.8, 2.2, 2.6), coverColor, true));
-    this.boxes.push(makeBox(v3(13.2, 1.1, -9.2), v3(2.8, 2.2, 4.8), coverColor, true));
-    this.boxes.push(makeBox(v3(13.2, 1.1, 9.2), v3(2.8, 2.2, 4.8), coverColor, true));
+    this.boxes.push(makeBox(v3(-10, 1.0, 0), v3(4.8, 2, 3.2), coverColor, true));
+    this.boxes.push(makeBox(v3(14, 1.0, 0), v3(3.2, 2, 3.2), coverColor, true));
 
-    this.boxes.push(makeBox(v3(-21, 1.5, -2), v3(4, 3, 20), v3(0.21, 0.24, 0.31), true));
-    this.boxes.push(makeBox(v3(21, 1.5, -2), v3(4, 3, 20), v3(0.21, 0.24, 0.31), true));
-    this.boxes.push(makeBox(v3(-17, 1.0, -18), v3(4, 2, 2), coverColor, true));
-    this.boxes.push(makeBox(v3(-17, 1.0, 14), v3(4, 2, 2), coverColor, true));
-    this.boxes.push(makeBox(v3(17, 1.0, -18), v3(4, 2, 2), coverColor, true));
-    this.boxes.push(makeBox(v3(17, 1.0, 14), v3(4, 2, 2), coverColor, true));
+    this.boxes.push(makeBox(v3(-5, 1.5, 20), v3(7, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(7.5, 1.5, 20), v3(6.5, 3, 2.2), wallColor, true));
+    this.boxes.push(makeBox(v3(3, 1.5, 14), v3(2.2, 3, 8), wallColor, true));
+    this.boxes.push(makeBox(v3(11, 1.5, 12), v3(2.2, 3, 6), wallColor, true));
 
-    this.boxes.push(makeBox(v3(-22, 0.25, -12), v3(2, 0.5, 2), v3(0.2, 0.45, 0.85), false));
-    this.boxes.push(makeBox(v3(22, 0.25, 10), v3(2, 0.5, 2), v3(0.86, 0.42, 0.18), false));
+    this.boxes.push(makeBox(v3(-7, 1.0, 10), v3(4.5, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(10, 1.0, 16), v3(4, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(15.5, 1.0, 9), v3(3, 2, 4), coverColor, true));
+
+    this.boxes.push(makeBox(v3(-16.5, 1.0, -14), v3(3, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(-16.5, 1.0, -4), v3(3, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(16.5, 1.0, 14), v3(3, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(16.5, 1.0, 4), v3(3, 2, 3), coverColor, true));
+
+    this.boxes.push(makeBox(v3(16, 0.25, -14), v3(2.2, 0.5, 2.2), v3(0.22, 0.45, 0.86), false));
+    this.boxes.push(makeBox(v3(16, 0.25, 14), v3(2.2, 0.5, 2.2), v3(0.86, 0.42, 0.18), false));
 
     rebuildGameplayColliders();
 
-    const siteA = v3(10, 0.05, -13);
-    const siteB = v3(10, 0.05, 13);
+    const siteA = v3(16, 0.05, -14);
+    const siteB = v3(16, 0.05, 14);
     this.round.sites = [
       { key: 'A', pos: siteA, radius: 2.8 },
       { key: 'B', pos: siteB, radius: 2.8 },
