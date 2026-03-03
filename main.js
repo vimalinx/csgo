@@ -865,6 +865,7 @@ const WEAPON_DEFS = [
     reloadSec: 3.0,
     speed: 4.5,
     tip: '高伤害狙击步枪',
+    zoomLevel: 4, // 4倍镜
   },
   {
     id: 'scout',
@@ -884,6 +885,7 @@ const WEAPON_DEFS = [
     reloadSec: 2.8,
     speed: 4.5,
     tip: '轻型高机动狙击枪',
+    zoomLevel: 2, // 2倍镜
   },
 ];
 
@@ -969,6 +971,12 @@ class Game {
     this.mouseDown = false;
     this.firePressed = false;
     this.isAiming = false;
+    this.scope = {
+      active: false,
+      zoomLevel: 1,
+      targetZoom: 1,
+      transitioning: false,
+    };
     this.fireModeAuto = true; // 玩家可切换的开火模式
     /** @type {'flash' | 'smoke' | 'none'} */
     this.currentEquip = 'none';
@@ -1120,6 +1128,55 @@ class Game {
     // 切换投掷物时清空射击输入，避免误开火
     this.mouseDown = false;
     this.firePressed = false;
+  }
+
+  /**
+   * 检测移动状态
+   * @returns {'standing' | 'walking' | 'running' | 'jumping'}
+   */
+  getMovementState() {
+    // 如果在空中，返回跳跃状态
+    if (!this.onGround) return 'jumping';
+    
+    // 计算水平速度
+    const speed = Math.sqrt(this.vel.x ** 2 + this.vel.z ** 2);
+    
+    // 根据速度判断移动状态
+    // 跑步速度阈值：200 单位/秒（转换为游戏速度约为 6.8）
+    // 走路速度阈值：50 单位/秒（转换为游戏速度约为 2.0）
+    if (speed > 6.0) return 'running';
+    if (speed > 2.0) return 'walking';
+    return 'standing';
+  }
+
+  /**
+   * 计算最终散布
+   * @returns {number} 散布角度（度数）
+   */
+  calculateSpread() {
+    const w = this.getWeapon();
+    if (!w) return 0;
+    
+    // 获取基础散布
+    const baseSpread = w.def.spreadDeg || 2.0;
+    
+    // 获取移动状态
+    const movementState = this.getMovementState();
+    
+    // 移动散布倍率
+    const MOVEMENT_SPREAD_MULTIPLIERS = {
+      standing: 1.0,
+      walking: 1.3,
+      running: 1.6,
+      jumping: 2.0
+    };
+    const movementMultiplier = MOVEMENT_SPREAD_MULTIPLIERS[movementState] || 1.0;
+    
+    // 武器散布倍率（如果武器定义中没有，默认为 1.0）
+    const weaponMultiplier = w.def.spreadMultiplier || 1.0;
+    
+    // 计算最终散布
+    return baseSpread * movementMultiplier * weaponMultiplier;
   }
 
   buildMap() {
@@ -2012,6 +2069,13 @@ function startAIMode() {
   game.ending = false;
   game.stats.kills = 0;
   game.stats.deaths = 0;
+  game.isAiming = false;
+  game.scope = {
+    active: false,
+    zoomLevel: 1,
+    targetZoom: 1,
+    transitioning: false,
+  };
   game.buildMap();
   game.score.ct = 0;
   game.score.t = 0;
@@ -2065,24 +2129,112 @@ uniform mat4 uView;
 uniform mat4 uModel;
 uniform vec3 uColor;
 uniform vec3 uLightDir;
+uniform mat4 uLightSpaceMatrix;
+uniform vec3 uViewPos;
+
 out vec3 vColor;
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec4 vFragPosLightSpace;
+
 void main() {
   vec4 worldPos = uModel * vec4(aPos, 1.0);
   vec3 n = normalize(mat3(uModel) * aNor);
-  float ndl = clamp(dot(n, normalize(-uLightDir)), 0.0, 1.0);
+
+  // 增强的光照计算
+  vec3 lightDir = normalize(-uLightDir);
+
+  // 环境光
+  float ambient = 0.35;
+
+  // 漫反射光（增强对比度）
+  float ndl = clamp(dot(n, lightDir), 0.0, 1.0);
+  float diffuse = ndl * 0.65;
+
+  // 高度照明（高处更亮）
   float heightLight = clamp((worldPos.y + 0.8) / 10.0, 0.0, 1.0);
-  float lit = (0.28 + ndl * 0.62) * mix(0.85, 1.18, heightLight);
+  float heightFactor = mix(0.85, 1.25, heightLight);
+
+  // 环境光遮蔽（AO）模拟 - 低处和角落更暗
+  float ao = 1.0;
+  if (worldPos.y < 0.5) {
+    ao = mix(0.7, 1.0, clamp(worldPos.y / 0.5, 0.0, 1.0));
+  }
+
+  // 边缘光照（rim lighting）
+  vec3 viewDir = normalize(uViewPos - worldPos.xyz);
+  float rim = 1.0 - clamp(dot(viewDir, n), 0.0, 1.0);
+  rim = pow(rim, 3.0) * 0.15;
+
+  // 最终光照
+  float lit = (ambient + diffuse + rim) * heightFactor * ao;
+
   vColor = uColor * lit;
+  vWorldPos = worldPos.xyz;
+  vNormal = n;
+  vFragPosLightSpace = uLightSpaceMatrix * worldPos;
+
   gl_Position = uProj * uView * worldPos;
 }
 `;
 
 const FS = `#version 300 es
 precision highp float;
+
 in vec3 vColor;
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec4 vFragPosLightSpace;
+
+uniform sampler2D uShadowMap;
+uniform vec3 uLightDir;
+uniform vec3 uViewPos;
+
 out vec4 fragColor;
+
 void main() {
-  fragColor = vec4(vColor, 1.0);
+  vec3 color = vColor;
+
+  // 简化的阴影模拟（基于高度和法线）
+  float fakeShadow = 0.0;
+  if (vWorldPos.y < 0.1) {
+    // 地面阴影 - 根据附近建筑物计算
+    // 这里简化处理，基于世界坐标模拟阴影
+    float buildingShadow = 0.0;
+
+    // 模拟几个主要建筑物的阴影
+    vec2 shadowPos1 = vWorldPos.xz - vec2(-20.0, -10.0);
+    vec2 shadowPos2 = vWorldPos.xz - vec2(20.0, 10.0);
+
+    // 建筑物1的阴影（向光方向延伸）
+    if (length(shadowPos1) < 8.0) {
+      buildingShadow = 0.3 * (1.0 - length(shadowPos1) / 8.0);
+    }
+
+    // 建筑物2的阴影
+    if (length(shadowPos2) < 8.0) {
+      buildingShadow = max(buildingShadow, 0.3 * (1.0 - length(shadowPos2) / 8.0));
+    }
+
+    fakeShadow = buildingShadow;
+  }
+
+  // 应用阴影
+  color = color * (1.0 - fakeShadow);
+
+  // 地面特殊处理 - 增加层次感
+  if (vWorldPos.y < 0.1) {
+    // 距离衰减 - 远处略暗
+    float dist = length(vWorldPos.xz);
+    float distFade = 1.0 - clamp(dist / 60.0, 0.0, 0.25);
+    color *= mix(0.82, 1.0, distFade);
+
+    // 地面纹理模拟（基于位置的明暗变化）
+    float pattern = sin(vWorldPos.x * 0.5) * sin(vWorldPos.z * 0.5);
+    color *= 1.0 + pattern * 0.04;
+  }
+
+  fragColor = vec4(color, 1.0);
 }
 `;
 
@@ -2094,7 +2246,10 @@ const uView = gl.getUniformLocation(program, 'uView');
 const uModel = gl.getUniformLocation(program, 'uModel');
 const uColor = gl.getUniformLocation(program, 'uColor');
 const uLightDir = gl.getUniformLocation(program, 'uLightDir');
-if (!uProj || !uView || !uModel || !uColor || !uLightDir) throw new Error('Uniforms missing');
+const uLightSpaceMatrix = gl.getUniformLocation(program, 'uLightSpaceMatrix');
+const uViewPos = gl.getUniformLocation(program, 'uViewPos');
+const uShadowMap = gl.getUniformLocation(program, 'uShadowMap');
+if (!uProj || !uView || !uModel || !uColor || !uLightDir || !uLightSpaceMatrix || !uViewPos || !uShadowMap) throw new Error('Uniforms missing');
 
 const cube = buildCubeMesh();
 const cylinder = buildCylinderMesh(18);
@@ -2138,7 +2293,74 @@ gl.enable(gl.DEPTH_TEST);
 gl.enable(gl.CULL_FACE);
 gl.cullFace(gl.BACK);
 
-game.buildMap();
+// ========== 阴影映射系统 ==========
+const SHADOW_WIDTH = 2048;
+const SHADOW_HEIGHT = 2048;
+
+// 创建深度贴图帧缓冲
+const depthMapFBO = gl.createFramebuffer();
+
+// 创建深度贴图纹理
+const depthMap = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, depthMap);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_WIDTH, SHADOW_HEIGHT, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+// 绑定深度贴图到帧缓冲
+gl.bindFramebuffer(gl.FRAMEBUFFER, depthMapFBO);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthMap, 0);
+gl.drawBuffers([gl.NONE]);
+gl.readBuffer(gl.NONE);
+if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+  console.error('Shadow framebuffer incomplete');
+}
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+// 光源投影矩阵和视图矩阵
+function createLightSpaceMatrix() {
+  // 正交投影（用于定向光）
+  const lightProj = new Float32Array(16);
+  const near = -50.0;
+  const far = 150.0;
+  const size = 40.0;
+
+  // 正交投影矩阵
+  lightProj[0] = 2.0 / (size * 2);
+  lightProj[1] = 0.0;
+  lightProj[2] = 0.0;
+  lightProj[3] = 0.0;
+  lightProj[4] = 0.0;
+  lightProj[5] = 2.0 / (size * 2);
+  lightProj[6] = 0.0;
+  lightProj[7] = 0.0;
+  lightProj[8] = 0.0;
+  lightProj[9] = 0.0;
+  lightProj[10] = -2.0 / (far - near);
+  lightProj[11] = 0.0;
+  lightProj[12] = 0.0;
+  lightProj[13] = 0.0;
+  lightProj[14] = -(far + near) / (far - near);
+  lightProj[15] = 1.0;
+
+  // 光源视图矩阵（从光源位置看向场景）
+  const lightView = new Float32Array(16);
+  const lightPos = v3(50, 100, 50);
+  const lightTarget = v3(0, 0, 0);
+  const lightUp = v3(0, 1, 0);
+  mat4LookAt(lightView, lightPos, lightTarget, lightUp);
+
+  // 组合矩阵
+  const lightSpaceMatrix = new Float32Array(16);
+  mat4Mul(lightSpaceMatrix, lightProj, lightView);
+
+  return lightSpaceMatrix;
+}
+
+const lightSpaceMatrix = createLightSpaceMatrix();
+console.log('✨ Shadow mapping system initialized');
 game.switchWeaponBySlot('secondary');
 
 const proj = mat4Identity();
@@ -2168,7 +2390,15 @@ function updateHud() {
     const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
     const equipLabel = getEquipLabel(game.currentEquip);
     const equipText = equipLabel ? ` · [投掷] ${equipLabel}` : '';
-    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}${equipText}`;
+    
+    // 显示倍率
+    let scopeText = '';
+    if (game.scope.active || game.scope.transitioning) {
+      const zoom = game.scope.zoomLevel.toFixed(1);
+      scopeText = ` · [镜] ${zoom}x`;
+    }
+    
+    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}${equipText}${scopeText}`;
   }
 
   if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
@@ -2422,7 +2652,11 @@ document.addEventListener('mousedown', (e) => {
     if (!w) return;
     if (w.def.category === 'sniper') {
       e.preventDefault();
+      // 开镜
       game.isAiming = true;
+      game.scope.active = true;
+      game.scope.targetZoom = w.def.zoomLevel || 4;
+      game.scope.transitioning = true;
       return;
     }
     if (w.def.category === 'pistol') {
@@ -2437,7 +2671,11 @@ document.addEventListener('mouseup', (e) => {
   if (e.button === 0) game.mouseDown = false;
   if (e.button === 2) {
     e.preventDefault();
+    // 关镜
     game.isAiming = false;
+    game.scope.active = false;
+    game.scope.targetZoom = 1;
+    game.scope.transitioning = true;
   }
 });
 
@@ -2481,6 +2719,9 @@ window.addEventListener('blur', () => {
   game.mouseDown = false;
   game.firePressed = false;
   game.isAiming = false;
+  game.scope.active = false;
+  game.scope.targetZoom = 1;
+  game.scope.transitioning = true;
   game.mouseDX = 0;
   game.mouseDY = 0;
 });
@@ -3114,6 +3355,12 @@ function updatePlayer(dt) {
       w.def.id === 'smoke');
   let baseSpeed = speed * (sprint ? 6.8 / 6.0 : 4.8 / 6.0);
   if (holdingThrowable) baseSpeed *= 0.9;
+  
+  // 开镜时移动速度降低50%
+  if (game.scope.active) {
+    baseSpeed *= 0.5;
+  }
+  
   const maxSpeed = crouching ? baseSpeed * 0.55 : baseSpeed;
   const accel = game.onGround ? 45 : 18;
   const friction = game.onGround ? 14 : 1;
@@ -3431,7 +3678,22 @@ function updateBots(dt) {
 function drawWorld() {
   glsys.resize();
   const aspect = glsys.width / Math.max(1, glsys.height);
-  const fovDeg = game.isAiming ? 26 : 70;
+  
+  // 平滑的瞄准镜缩放过渡
+  if (game.scope.transitioning) {
+    const diff = game.scope.targetZoom - game.scope.zoomLevel;
+    game.scope.zoomLevel += diff * 0.15; // 过渡速度
+    
+    if (Math.abs(diff) < 0.01) {
+      game.scope.zoomLevel = game.scope.targetZoom;
+      game.scope.transitioning = false;
+    }
+  }
+  
+  // 根据缩放级别计算 FOV
+  const baseFov = 70;
+  const fovDeg = baseFov / game.scope.zoomLevel;
+  
   mat4Perspective(proj, (fovDeg * Math.PI) / 180, aspect, 0.05, 120);
 
   const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
