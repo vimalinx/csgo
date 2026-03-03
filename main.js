@@ -960,6 +960,7 @@ class Game {
     this.mouseDY = 0;
     this.weaponIndex = 0;
     this.weapons = [];
+    this.currentEquip = 'none';
     this.weaponSlots = { primary: '', secondary: '' };
     this.boxes = [];
     this.colliders = [];
@@ -2077,6 +2078,7 @@ const uLightDir = gl.getUniformLocation(program, 'uLightDir');
 if (!uProj || !uView || !uModel || !uColor || !uLightDir) throw new Error('Uniforms missing');
 
 const cube = buildCubeMesh();
+const cylinder = buildCylinderMesh(18);
 const vao = gl.createVertexArray();
 if (!vao) throw new Error('VAO failed');
 gl.bindVertexArray(vao);
@@ -2094,6 +2096,24 @@ gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cube.indices, gl.STATIC_DRAW);
 gl.bindVertexArray(null);
 glsys.vao = vao;
 glsys.indexCount = cube.indices.length;
+
+const cylVao = gl.createVertexArray();
+if (!cylVao) throw new Error('Cylinder VAO failed');
+gl.bindVertexArray(cylVao);
+const cylVbo = gl.createBuffer();
+const cylIbo = gl.createBuffer();
+if (!cylVbo || !cylIbo) throw new Error('Cylinder buffer failed');
+gl.bindBuffer(gl.ARRAY_BUFFER, cylVbo);
+gl.bufferData(gl.ARRAY_BUFFER, cylinder.vertices, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+gl.enableVertexAttribArray(1);
+gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cylIbo);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cylinder.indices, gl.STATIC_DRAW);
+gl.bindVertexArray(null);
+glsys.cylVao = cylVao;
+glsys.cylIndexCount = cylinder.indices.length;
 
 gl.enable(gl.DEPTH_TEST);
 gl.enable(gl.CULL_FACE);
@@ -3369,6 +3389,16 @@ function drawWorld() {
     gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
   }
 
+  function drawOrientedCylinder(pos, right, up, forward, scale, color) {
+    if (!glsys.cylVao || !glsys.cylIndexCount) return;
+    mat4FromBasisTRS(model, right, up, forward, pos, scale);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uColor, color.x, color.y, color.z);
+    gl.bindVertexArray(glsys.cylVao);
+    gl.drawElements(gl.TRIANGLES, glsys.cylIndexCount, gl.UNSIGNED_SHORT, 0);
+    gl.bindVertexArray(glsys.vao);
+  }
+
   function drawTracer(a, b, color) {
     const mid = v3scale(v3add(a, b), 0.5);
     const d = v3sub(b, a);
@@ -3538,7 +3568,26 @@ function drawWorld() {
     drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
   }
 
-  if (w.def.kind === 0) {
+  const currentEquip = typeof game.currentEquip === 'string' ? game.currentEquip : 'none';
+  if (currentEquip !== 'none') {
+    const grenadeColor = currentEquip === 'flash' ? v3(1.0, 1.0, 0.0) : v3(68 / 255, 68 / 255, 68 / 255);
+    const wobbleT = nowMs() * 0.001;
+    const wobbleX = Math.sin(wobbleT * 6.8) * 0.015;
+    const wobbleY = Math.cos(wobbleT * 5.6) * 0.01;
+    const wobbleTilt = Math.sin(wobbleT * 4.2) * 0.14;
+
+    const throwablePos = v3add(
+      wmOrigin,
+      v3add(v3add(v3scale(camRight, 0.06 + wobbleX), v3scale(camUp, -0.04 + wobbleY)), v3scale(fwd, 0.46))
+    );
+    const cylUp = v3norm(v3add(swayFwd, v3scale(swayRight, wobbleTilt)));
+    let cylRight = v3cross(swayUp, cylUp);
+    if (v3len(cylRight) < 0.001) cylRight = v3(1, 0, 0);
+    cylRight = v3norm(cylRight);
+    const cylForward = v3norm(v3cross(cylRight, cylUp));
+
+    drawOrientedCylinder(throwablePos, cylRight, cylUp, cylForward, v3(0.04, 0.12, 0.04), grenadeColor);
+  } else if (w.def.kind === 0) {
     const dark = v3(0.16, 0.17, 0.2);
     const metal = v3(0.22, 0.22, 0.24);
     const accent = v3(0.12, 0.23, 0.2);
