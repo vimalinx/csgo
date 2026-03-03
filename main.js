@@ -679,6 +679,23 @@ const DEFAULT_SPEED = 6.0;
 
 const WEAPON_DEFS = [
   {
+    id: 'knife',
+    name: 'Knife',
+    category: 'melee',
+    slot: 'melee',
+    kind: 4,
+    auto: false,
+    damage: 50,
+    spreadDeg: 0,
+    recoil: 0,
+    accuracy: 100,
+    magSize: 999,
+    reserveMax: 999,
+    reloadSec: 0,
+    speed: 7.5,
+    tip: '近战武器',
+  },
+  {
     id: 'glock',
     name: 'Glock',
     category: 'pistol',
@@ -961,7 +978,7 @@ class Game {
     this.weaponIndex = 0;
     this.weapons = [];
     this.currentEquip = 'none';
-    this.weaponSlots = { primary: '', secondary: '' };
+    this.weaponSlots = { primary: '', secondary: '', melee: '' };
     this.boxes = [];
     this.colliders = [];
     this.grid = Array.from({ length: NAV_GRID_SIZE }, () => Array(NAV_GRID_SIZE).fill(0));
@@ -1393,9 +1410,11 @@ function getWeaponStateById(id) {
 function syncWeaponSlots() {
   game.weaponSlots.primary = '';
   game.weaponSlots.secondary = '';
+  game.weaponSlots.melee = '';
   for (const ws of game.weapons) {
     if (ws.def.slot === 'primary') game.weaponSlots.primary = ws.def.id;
     if (ws.def.slot === 'secondary') game.weaponSlots.secondary = ws.def.id;
+    if (ws.def.slot === 'melee') game.weaponSlots.melee = ws.def.id;
   }
 }
 
@@ -2328,6 +2347,13 @@ document.addEventListener('keydown', (e) => {
     else game.switchWeaponBySlot('secondary');
   }
   if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
+  if (e.code === 'Digit3') {
+    game.switchEquip(game.currentEquip === 'flash' ? 'none' : 'flash');
+  }
+  if (e.code === 'Digit4') {
+    game.switchEquip(game.currentEquip === 'smoke' ? 'none' : 'smoke');
+  }
+  if (e.code === 'Digit5') game.switchWeaponBySlot('melee');
   if (e.code === 'Digit3') {
     game.switchEquip(game.currentEquip === 'flash' ? 'none' : 'flash');
   }
@@ -3587,6 +3613,18 @@ function drawWorld() {
     const cylForward = v3norm(v3cross(cylRight, cylUp));
 
     drawOrientedCylinder(throwablePos, cylRight, cylUp, cylForward, v3(0.04, 0.12, 0.04), grenadeColor);
+  } else if (w.def.kind === 4) {
+    // 刀
+    const bladeColor = v3(0.75, 0.75, 0.75); // 银色
+    const handleColor = v3(0.27, 0.27, 0.27); // 深灰色
+
+    // 刀刃
+    const bladePos = v3add(wmOrigin, v3add(v3scale(camRight, 0.06), v3add(v3scale(camUp, -0.02), v3scale(fwd, 0.45))));
+    drawOrientedBox(bladePos, swayRight, swayUp, swayFwd, v3(0.03, 0.3, 0.003), bladeColor);
+
+    // 手柄
+    const handlePos = v3add(wmOrigin, v3add(v3scale(camRight, 0.06), v3add(v3scale(camUp, 0.08), v3scale(fwd, 0.35))));
+    drawOrientedBox(handlePos, swayRight, swayUp, swayFwd, v3(0.025, 0.1, 0.02), handleColor);
   } else if (w.def.kind === 0) {
     const dark = v3(0.16, 0.17, 0.2);
     const metal = v3(0.22, 0.22, 0.24);
