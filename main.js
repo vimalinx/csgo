@@ -572,6 +572,8 @@ function makeBot(id, pos) {
     },
     state: 'patrol',
     patrolPhase: Math.random() * Math.PI * 2,
+    patrolNode: 0,
+    objectiveSite: id % 2 === 0 ? 'A' : 'B',
   };
 }
 
@@ -654,6 +656,28 @@ class Game {
     this.score = { ct: 0, t: 0, limit: 25 };
     this.ending = false;
     this.stats = { kills: 0, deaths: 0 };
+    this.mapBounds = 27.5;
+    this.spawnZones = {
+      ct: [v3(-23, 0.0, -14), v3(-23, 0.0, -6), v3(-23, 0.0, 2), v3(-23, 0.0, 10), v3(-19, 0.0, -10), v3(-19, 0.0, 6)],
+      t: [v3(23, 0.0, -14), v3(23, 0.0, -6), v3(23, 0.0, 2), v3(23, 0.0, 10), v3(19, 0.0, -10), v3(19, 0.0, 6)],
+    };
+    this.routeNodes = {
+      ct: [v3(-22, 0, -13), v3(-14, 0, -13), v3(-6, 0, -13), v3(2, 0, -13), v3(10, 0, -13), v3(18, 0, -13), v3(-20, 0, -1), v3(-12, 0, -1), v3(-4, 0, -1), v3(0, 0, -1), v3(6, 0, -1), v3(14, 0, -1), v3(-22, 0, 12), v3(-14, 0, 12), v3(-6, 0, 12), v3(2, 0, 12), v3(10, 0, 12), v3(18, 0, 12)],
+      t: [v3(22, 0, -13), v3(14, 0, -13), v3(6, 0, -13), v3(-2, 0, -13), v3(-10, 0, -13), v3(-18, 0, -13), v3(20, 0, -1), v3(12, 0, -1), v3(4, 0, -1), v3(0, 0, -1), v3(-6, 0, -1), v3(-14, 0, -1), v3(22, 0, 12), v3(14, 0, 12), v3(6, 0, 12), v3(-2, 0, 12), v3(-10, 0, 12), v3(-18, 0, 12)],
+    };
+    this.smoke = {
+      cooldown: 0,
+      cooldownTotal: 16,
+      duration: 8,
+      active: [],
+      chokePoints: [
+        { id: 'midN', pos: v3(0, 0.9, -12), scale: v3(2.6, 1.8, 3.2) },
+        { id: 'midC', pos: v3(0, 0.9, -1), scale: v3(2.6, 1.8, 3.2) },
+        { id: 'midS', pos: v3(0, 0.9, 11), scale: v3(2.6, 1.8, 3.2) },
+        { id: 'Adoor', pos: v3(8, 0.9, -13), scale: v3(2.6, 1.8, 3.2) },
+        { id: 'Bdoor', pos: v3(8, 0.9, 13), scale: v3(2.6, 1.8, 3.2) },
+      ],
+    };
     this.round = {
       state: 'idle',
       tPlanting: false,
@@ -664,9 +688,15 @@ class Game {
       bombPlanted: false,
       bombTimer: 0,
       bombTotal: 35,
-      bombPos: v3(6, 0.05, 0),
-      sitePos: v3(6, 0.05, 0),
-      siteRadius: 2.5,
+      bombPos: v3(10, 0.05, -13),
+      sitePos: v3(10, 0.05, -13),
+      siteRadius: 2.8,
+      sites: [
+        { key: 'A', pos: v3(10, 0.05, -13), radius: 2.8 },
+        { key: 'B', pos: v3(10, 0.05, 13), radius: 2.8 },
+      ],
+      activeSite: '',
+      plantSite: '',
     };
     this.showingSettingsFrom = 'lobby';
     this.lastStatusAt = 0;
@@ -689,30 +719,65 @@ class Game {
     this.targets.length = 0;
     this.bots.length = 0;
 
-    this.boxes.push(makeBox(v3(0, -0.5, 0), v3(40, 1, 40), v3(0.12, 0.14, 0.18), true));
-    this.boxes.push(makeBox(v3(0, 2, -20), v3(40, 6, 1), v3(0.18, 0.2, 0.27), true));
-    this.boxes.push(makeBox(v3(0, 2, 20), v3(40, 6, 1), v3(0.18, 0.2, 0.27), true));
-    this.boxes.push(makeBox(v3(-20, 2, 0), v3(1, 6, 40), v3(0.18, 0.2, 0.27), true));
-    this.boxes.push(makeBox(v3(20, 2, 0), v3(1, 6, 40), v3(0.18, 0.2, 0.27), true));
+    const wallColor = v3(0.18, 0.2, 0.27);
+    const coverColor = v3(0.2, 0.23, 0.29);
+    this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), v3(0.12, 0.14, 0.18), true));
+    this.boxes.push(makeBox(v3(0, 2, -28), v3(56, 6, 1), wallColor, true));
+    this.boxes.push(makeBox(v3(0, 2, 28), v3(56, 6, 1), wallColor, true));
+    this.boxes.push(makeBox(v3(-28, 2, 0), v3(1, 6, 56), wallColor, true));
+    this.boxes.push(makeBox(v3(28, 2, 0), v3(1, 6, 56), wallColor, true));
 
-    this.boxes.push(makeBox(v3(0, 0.5, 0), v3(2.5, 1, 12), v3(0.22, 0.22, 0.26), true));
-    this.boxes.push(makeBox(v3(-8, 0.5, -3), v3(6, 1, 2), v3(0.2, 0.23, 0.29), true));
-    this.boxes.push(makeBox(v3(-8, 1.25, 2), v3(3, 2.5, 2), v3(0.23, 0.2, 0.28), true));
-    this.boxes.push(makeBox(v3(9, 0.5, -6), v3(6, 1, 2), v3(0.2, 0.23, 0.29), true));
-    this.boxes.push(makeBox(v3(8, 1.0, 6), v3(2, 2, 6), v3(0.23, 0.19, 0.24), true));
-    this.boxes.push(makeBox(v3(0, 1.5, -10), v3(10, 3, 2), v3(0.2, 0.2, 0.24), true));
-    this.boxes.push(makeBox(v3(12, 1.5, 0), v3(2, 3, 10), v3(0.2, 0.2, 0.24), true));
+    this.boxes.push(makeBox(v3(0, 1.5, -19), v3(2.4, 3, 9.5), wallColor, true));
+    this.boxes.push(makeBox(v3(0, 1.5, -7), v3(2.4, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(0, 1.5, 6), v3(2.4, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(0, 1.5, 18), v3(2.4, 3, 10), wallColor, true));
 
-    this.boxes.push(makeBox(v3(-12, 0.25, 10), v3(2, 0.5, 2), v3(0.13, 0.3, 0.22), false));
-    this.boxes.push(makeBox(v3(12, 0.25, -12), v3(2, 0.5, 2), v3(0.13, 0.3, 0.22), false));
+    this.boxes.push(makeBox(v3(-13, 1.2, -16), v3(6, 2.4, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(13, 1.2, -16), v3(6, 2.4, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(-7, 1.0, -11), v3(4, 2, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(7, 1.0, -11), v3(4, 2, 2.6), coverColor, true));
 
-    for (const b of this.boxes) if (b.solid) this.colliders.push(b.aabb);
+    this.boxes.push(makeBox(v3(-10, 1.0, -1), v3(5, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(10, 1.0, -1), v3(5, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(-4, 0.9, 4), v3(3.4, 1.8, 2.4), coverColor, true));
+    this.boxes.push(makeBox(v3(4, 0.9, 4), v3(3.4, 1.8, 2.4), coverColor, true));
 
-    this.bots.push(makeBot(1, v3(-10, 0.0, -12)));
-    this.bots.push(makeBot(2, v3(10, 0.0, -12)));
-    this.bots.push(makeBot(3, v3(-10, 0.0, 12)));
-    this.bots.push(makeBot(4, v3(10, 0.0, 12)));
-    this.bots.push(makeBot(5, v3(0, 0.0, -16)));
+    this.boxes.push(makeBox(v3(-14, 1.0, 14), v3(6, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(14, 1.0, 14), v3(6, 2, 3), coverColor, true));
+    this.boxes.push(makeBox(v3(-8, 1.2, 18), v3(3, 2.4, 5), coverColor, true));
+    this.boxes.push(makeBox(v3(8, 1.2, 18), v3(3, 2.4, 5), coverColor, true));
+
+    this.boxes.push(makeBox(v3(0, 1.2, -1), v3(7.5, 2.4, 4.2), v3(0.24, 0.24, 0.3), true));
+    this.boxes.push(makeBox(v3(-5.3, 0.45, -1), v3(2.6, 0.9, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(5.3, 0.45, -1), v3(2.6, 0.9, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(7.3, 1.1, -13), v3(3.8, 2.2, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(7.3, 1.1, 13), v3(3.8, 2.2, 2.6), coverColor, true));
+    this.boxes.push(makeBox(v3(13.2, 1.1, -9.2), v3(2.8, 2.2, 4.8), coverColor, true));
+    this.boxes.push(makeBox(v3(13.2, 1.1, 9.2), v3(2.8, 2.2, 4.8), coverColor, true));
+
+    this.boxes.push(makeBox(v3(-21, 1.5, -2), v3(4, 3, 20), v3(0.21, 0.24, 0.31), true));
+    this.boxes.push(makeBox(v3(21, 1.5, -2), v3(4, 3, 20), v3(0.21, 0.24, 0.31), true));
+    this.boxes.push(makeBox(v3(-17, 1.0, -18), v3(4, 2, 2), coverColor, true));
+    this.boxes.push(makeBox(v3(-17, 1.0, 14), v3(4, 2, 2), coverColor, true));
+    this.boxes.push(makeBox(v3(17, 1.0, -18), v3(4, 2, 2), coverColor, true));
+    this.boxes.push(makeBox(v3(17, 1.0, 14), v3(4, 2, 2), coverColor, true));
+
+    this.boxes.push(makeBox(v3(-22, 0.25, -12), v3(2, 0.5, 2), v3(0.2, 0.45, 0.85), false));
+    this.boxes.push(makeBox(v3(22, 0.25, 10), v3(2, 0.5, 2), v3(0.86, 0.42, 0.18), false));
+
+    rebuildGameplayColliders();
+
+    const siteA = v3(10, 0.05, -13);
+    const siteB = v3(10, 0.05, 13);
+    this.round.sites = [
+      { key: 'A', pos: siteA, radius: 2.8 },
+      { key: 'B', pos: siteB, radius: 2.8 },
+    ];
+    this.round.sitePos = v3(siteA.x, siteA.y, siteA.z);
+    this.round.siteRadius = 2.8;
+    this.round.activeSite = '';
+    this.round.plantSite = '';
+    this.round.bombPos = v3(siteA.x, siteA.y, siteA.z);
   }
 }
 
@@ -776,20 +841,136 @@ function applyTeamToBots() {
   }
 }
 
+function rebuildGameplayColliders() {
+  game.colliders.length = 0;
+  for (const b of game.boxes) {
+    if (b.solid) game.colliders.push(b.aabb);
+  }
+  for (const s of game.smoke.active) {
+    game.colliders.push(s.aabb);
+  }
+}
+
+function getSiteByKey(key) {
+  if (!key) return game.round.sites[0] || null;
+  for (const s of game.round.sites) {
+    if (s.key === key) return s;
+  }
+  return game.round.sites[0] || null;
+}
+
+function setRoundSite(site) {
+  if (!site) return;
+  game.round.sitePos = v3(site.pos.x, site.pos.y, site.pos.z);
+  game.round.siteRadius = site.radius;
+}
+
+function detectSiteAtPosition(pos) {
+  const p = v3(pos.x, 0, pos.z);
+  for (const site of game.round.sites) {
+    const d = v3sub(p, v3(site.pos.x, 0, site.pos.z));
+    if (v3len(d) <= site.radius) return site;
+  }
+  return null;
+}
+
+function deploySmokeWall() {
+  if (!(game.mode === 'ai' && game.matchMode === 'bomb')) {
+    setStatus('Smoke available in bomb mode only', true);
+    return;
+  }
+  if (game.smoke.cooldown > 0) {
+    setStatus(`Smoke cooldown ${game.smoke.cooldown.toFixed(1)}s`, true);
+    return;
+  }
+
+  const p = v3(game.pos.x, 0.9, game.pos.z);
+  let best = null;
+  let bestD = Infinity;
+  for (const cp of game.smoke.chokePoints) {
+    const d = v3len(v3sub(p, cp.pos));
+    if (d < bestD) {
+      bestD = d;
+      best = cp;
+    }
+  }
+  if (!best) return;
+
+  for (const s of game.smoke.active) {
+    if (s.id === best.id) {
+      setStatus(`Smoke already active at ${best.id}`, true);
+      return;
+    }
+  }
+
+  const half = v3(best.scale.x * 0.5, best.scale.y * 0.5, best.scale.z * 0.5);
+  game.smoke.active.push({
+    id: best.id,
+    pos: v3(best.pos.x, best.pos.y, best.pos.z),
+    scale: v3(best.scale.x, best.scale.y, best.scale.z),
+    aabb: aabbFromCenter(best.pos, half),
+    expiresAt: nowMs() + game.smoke.duration * 1000,
+  });
+  game.smoke.cooldown = game.smoke.cooldownTotal;
+  rebuildGameplayColliders();
+  setStatus(`Smoke deployed: ${best.id}`, false);
+}
+
+function updateSmoke(dt) {
+  if (game.smoke.cooldown > 0) {
+    game.smoke.cooldown = Math.max(0, game.smoke.cooldown - dt);
+  }
+
+  const t = nowMs();
+  const keep = [];
+  let changed = false;
+  for (const s of game.smoke.active) {
+    if (t < s.expiresAt) keep.push(s);
+    else changed = true;
+  }
+  if (changed) {
+    game.smoke.active = keep;
+    rebuildGameplayColliders();
+  } else {
+    game.smoke.active = keep;
+  }
+}
+
+function randomSpawnFromTeam(team) {
+  const spots = game.spawnZones[team] || game.spawnZones.ct;
+  const idx = Math.floor(Math.random() * spots.length) % spots.length;
+  const base = spots[idx];
+  const jitter = v3((Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 1.4);
+  return v3add(base, jitter);
+}
+
+function respawnPlayer() {
+  const spawn = randomSpawnFromTeam(game.team);
+  game.hp = 100;
+  game.armor = 0;
+  game.pos = v3(spawn.x, 1.1, spawn.z);
+  game.vel = v3(0, 0, 0);
+}
+
 function rebuildBots(count) {
   game.bots.length = 0;
-  const ctSpots = [v3(-10, 0.0, 12), v3(-14, 0.0, 6), v3(-12, 0.0, 0), v3(-14, 0.0, -6), v3(-10, 0.0, -12)];
-  const tSpots = [v3(10, 0.0, 12), v3(14, 0.0, 6), v3(12, 0.0, 0), v3(14, 0.0, -6), v3(10, 0.0, -12)];
-  for (let i = 0; i < 5; i++) {
-    const jitter = v3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
-    const bot = makeBot(i + 1, v3add(ctSpots[i], jitter));
+  const teamSize = clamp(Math.floor(count), 1, 6);
+  for (let i = 0; i < teamSize; i++) {
+    const spawn = randomSpawnFromTeam('ct');
+    const bot = makeBot(i + 1, spawn);
     bot.team = 'ct';
+    bot.spawn = v3(spawn.x, spawn.y, spawn.z);
+    bot.patrolNode = Math.floor(Math.random() * game.routeNodes.ct.length) % game.routeNodes.ct.length;
+    bot.objectiveSite = i % 2 === 0 ? 'A' : 'B';
     game.bots.push(bot);
   }
-  for (let i = 0; i < 5; i++) {
-    const jitter = v3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
-    const bot = makeBot(i + 6, v3add(tSpots[i], jitter));
+  for (let i = 0; i < teamSize; i++) {
+    const spawn = randomSpawnFromTeam('t');
+    const bot = makeBot(i + 1 + teamSize, spawn);
     bot.team = 't';
+    bot.spawn = v3(spawn.x, spawn.y, spawn.z);
+    bot.patrolNode = Math.floor(Math.random() * game.routeNodes.t.length) % game.routeNodes.t.length;
+    bot.objectiveSite = i % 2 === 0 ? 'A' : 'B';
     game.bots.push(bot);
   }
   applyDifficultyToBots();
@@ -797,9 +978,7 @@ function rebuildBots(count) {
 
 function startAIMode() {
   game.mode = 'ai';
-  game.hp = 100;
-  game.armor = 0;
-  game.pos = v3(0, 1.1, 10);
+  respawnPlayer();
   game.vel = v3(0, 0, 0);
   game.crouchT = 0;
   game.landKick = 0;
@@ -818,8 +997,17 @@ function startAIMode() {
   game.round.defuseLeft = 0;
   game.round.bombPlanted = false;
   game.round.bombTimer = 0;
-  game.round.bombPos = v3(game.round.sitePos.x, game.round.sitePos.y, game.round.sitePos.z);
-  rebuildBots(10);
+  game.round.activeSite = Math.random() < 0.5 ? 'A' : 'B';
+  game.round.plantSite = '';
+  const firstSite = getSiteByKey(game.round.activeSite) || getSiteByKey('A');
+  if (firstSite) {
+    setRoundSite(firstSite);
+    game.round.bombPos = v3(firstSite.pos.x, firstSite.pos.y, firstSite.pos.z);
+  }
+  game.smoke.active = [];
+  game.smoke.cooldown = 0;
+  rebuildGameplayColliders();
+  rebuildBots(game.botCount);
 
   for (const ws of game.weapons) {
     ws.mag = ws.def.magSize;
@@ -964,12 +1152,14 @@ function updateHud() {
   const showObj = game.matchMode === 'bomb' && game.mode === 'ai';
   objectiveEl.classList.toggle('hidden', !showObj);
   if (showObj) {
+    const siteLabel = r.activeSite || 'A/B';
+    const plantedLabel = r.plantSite || siteLabel;
     if (!r.bombPlanted) {
-      objectiveText.textContent = game.team === 't' ? 'Plant the bomb (E hold)' : 'Stop the plant';
-      objectiveTimer.textContent = '';
+      objectiveText.textContent = game.team === 't' ? `Plant at ${siteLabel} (E hold)` : `Defend site ${siteLabel}`;
+      objectiveTimer.textContent = `SMK ${game.smoke.cooldown.toFixed(1)}s`;
       objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
     } else {
-      objectiveText.textContent = game.team === 'ct' ? 'Defuse (E hold)' : 'Bomb planted';
+      objectiveText.textContent = game.team === 'ct' ? `Defuse ${plantedLabel} (E hold)` : `Bomb planted ${plantedLabel}`;
       objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s`;
       objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
     }
@@ -1025,6 +1215,7 @@ document.addEventListener('keydown', (e) => {
       e.code === 'AltRight' ||
       e.code === 'KeyE' ||
       e.code === 'KeyR' ||
+      e.code === 'KeyG' ||
       e.code === 'Digit1' ||
       e.code === 'Digit2'
     ) {
@@ -1035,6 +1226,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') game.switchWeapon(0);
   if (e.code === 'Digit2') game.switchWeapon(1);
   if (e.code === 'KeyR') tryReload();
+  if (e.code === 'KeyG') deploySmokeWall();
   if (e.code === 'KeyB') {
     game.autoFire = !game.autoFire;
     setStatus(`Fire mode: ${game.autoFire ? 'AUTO' : 'SEMI'}`, false);
@@ -1170,8 +1362,8 @@ function setDifficulty(value) {
 }
 
 function setBotCount(value) {
-  game.botCount = clamp(value, 1, 12);
-  botCountText.textContent = '5v5';
+  game.botCount = clamp(value, 1, 6);
+  botCountText.textContent = `${game.botCount}v${game.botCount}`;
 }
 
 function setMatchMode(value) {
@@ -1305,6 +1497,14 @@ function moveAndCollide(pos, delta, colliders) {
   return { pos: p, onGround };
 }
 
+function rayBlockedBySmoke(ro, rd, maxDist) {
+  for (const s of game.smoke.active) {
+    const t = rayAabb(ro, rd, s.aabb);
+    if (t !== null && t > 0 && t < maxDist) return true;
+  }
+  return false;
+}
+
 function updateWeapon(dt) {
   const w = game.getWeapon();
   if (w.cooldown > 0) w.cooldown = Math.max(0, w.cooldown - dt);
@@ -1405,6 +1605,11 @@ function updateWeapon(dt) {
     const t = rayAabb(roAim, rdAim, c);
     if (t === null) continue;
     if (t > 0 && t < bestT) bestT = t;
+  }
+
+  if (rayBlockedBySmoke(roAim, rdAim, bestT)) {
+    bestT = Math.min(bestT, 12);
+    bestTarget = null;
   }
 
   for (const bot of game.bots) {
@@ -1525,19 +1730,40 @@ function updateBombMode(dt) {
   if (!(game.mode === 'ai' && game.matchMode === 'bomb')) return;
   const r = game.round;
 
-  const site = r.sitePos;
+  const fallbackSite =
+    getSiteByKey(r.activeSite) ||
+    getSiteByKey(r.plantSite) ||
+    getSiteByKey('A');
+  if (!fallbackSite) return;
+
+  const siteAtPlayer = detectSiteAtPosition(game.pos);
+  let liveSite = fallbackSite;
+  if (!r.bombPlanted && game.team === 't' && siteAtPlayer) {
+    r.activeSite = siteAtPlayer.key;
+    liveSite = siteAtPlayer;
+  }
+  if (r.bombPlanted) {
+    const plantedSite = getSiteByKey(r.plantSite);
+    if (plantedSite) liveSite = plantedSite;
+  }
+
+  setRoundSite(liveSite);
+
+  const site = liveSite.pos;
   const p = v3(game.pos.x, 0, game.pos.z);
   const d = v3sub(p, v3(site.x, 0, site.z));
-  const inSite = v3len(d) <= r.siteRadius;
+  const inSite = v3len(d) <= liveSite.radius;
   const holdingE = game.keys.has('KeyE');
 
   if (!r.bombPlanted) {
     if (inSite) {
-      setStatus(game.team === 't' ? 'Hold E to plant' : 'Protect site', false);
+      if (game.team === 't') setStatus(`Hold E to plant ${liveSite.key}`, false);
+      else setStatus(`Protect site ${r.activeSite || liveSite.key}`, false);
     }
   } else {
     if (inSite) {
-      setStatus(game.team === 'ct' ? 'Hold E to defuse' : 'Defend the bomb', false);
+      if (game.team === 'ct') setStatus(`Hold E to defuse ${r.plantSite || liveSite.key}`, false);
+      else setStatus('Defend the bomb', false);
     }
   }
 
@@ -1551,6 +1777,8 @@ function updateBombMode(dt) {
         r.bombPlanted = true;
         r.bombTimer = r.bombTotal;
         r.bombPos = v3(site.x, site.y, site.z);
+        r.plantSite = liveSite.key;
+        r.activeSite = liveSite.key;
         r.progress = 0;
         setStatus('Bomb planted', false);
       }
@@ -1673,8 +1901,8 @@ function updatePlayer(dt) {
     game.onGround = false;
   }
 
-  game.pos.x = clamp(game.pos.x, -18.5, 18.5);
-  game.pos.z = clamp(game.pos.z, -18.5, 18.5);
+  game.pos.x = clamp(game.pos.x, -game.mapBounds, game.mapBounds);
+  game.pos.z = clamp(game.pos.z, -game.mapBounds, game.mapBounds);
 
   const targetC = crouching ? 1 : 0;
   game.crouchT = lerp(game.crouchT, targetC, clamp01(dt * 12));
@@ -1707,7 +1935,10 @@ function updateBots(dt) {
       if (game.matchMode === 'endless' && tNow >= b.respawnAt) {
         b.alive = true;
         b.hp = b.maxHp;
-        b.pos = v3(b.spawn.x, b.spawn.y, b.spawn.z);
+        const spawn = randomSpawnFromTeam(b.team);
+        b.spawn = v3(spawn.x, spawn.y, spawn.z);
+        b.pos = v3(spawn.x, spawn.y, spawn.z);
+        b.objectiveSite = Math.random() < 0.5 ? 'A' : 'B';
       }
       continue;
     }
@@ -1764,7 +1995,11 @@ function updateBots(dt) {
     }
 
     if (game.matchMode === 'bomb' && !game.round.bombPlanted && b.team === 't') {
-      const site = game.round.sitePos;
+      const pick = getSiteByKey(b.objectiveSite) || getSiteByKey(game.round.activeSite) || getSiteByKey('A');
+      if (pick && !game.round.activeSite) game.round.activeSite = pick.key;
+      if (pick) b.objectiveSite = pick.key;
+      if (pick) setRoundSite(pick);
+      const site = pick ? pick.pos : game.round.sitePos;
       const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
       if (dSite < dist) {
         targetType = 'site';
@@ -1775,7 +2010,9 @@ function updateBots(dt) {
     }
 
     if (game.matchMode === 'bomb' && game.round.bombPlanted && b.team === 'ct') {
-      const site = game.round.sitePos;
+      const defSite = getSiteByKey(game.round.plantSite) || getSiteByKey(game.round.activeSite) || getSiteByKey('A');
+      if (defSite) setRoundSite(defSite);
+      const site = defSite ? defSite.pos : game.round.sitePos;
       const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
       if (dSite < dist) {
         targetType = 'site';
@@ -1807,8 +2044,18 @@ function updateBots(dt) {
       wish = v3(dir.x, 0, dir.z);
       if (dist < 4.2) wish = v3scale(wish, -0.25);
     } else {
-      const phase = (tNow * 0.001 + b.patrolPhase) % (Math.PI * 2);
-      wish = v3(Math.sin(phase), 0, Math.cos(phase));
+      const nodes = game.routeNodes[b.team] || game.routeNodes.ct;
+      const targetNode = nodes[b.patrolNode % nodes.length];
+      const toNode = v3sub(targetNode, v3(b.pos.x, 0, b.pos.z));
+      const distNode = v3len(toNode);
+      if (distNode < 1.5) {
+        b.patrolNode = (b.patrolNode + 1 + Math.floor(Math.random() * 2)) % nodes.length;
+      }
+      wish = v3norm(toNode);
+      if (distNode < 0.25) {
+        const phase = (tNow * 0.001 + b.patrolPhase) % (Math.PI * 2);
+        wish = v3(Math.sin(phase), 0, Math.cos(phase));
+      }
     }
     wish = v3norm(wish);
 
@@ -1822,8 +2069,8 @@ function updateBots(dt) {
     b.pos = next.pos;
     if (next.onGround && b.vel.y < 0) b.vel.y = 0;
 
-    b.pos.x = clamp(b.pos.x, -18.2, 18.2);
-    b.pos.z = clamp(b.pos.z, -18.2, 18.2);
+    b.pos.x = clamp(b.pos.x, -game.mapBounds + 0.3, game.mapBounds - 0.3);
+    b.pos.z = clamp(b.pos.z, -game.mapBounds + 0.3, game.mapBounds - 0.3);
 
     if (game.matchMode === 'bomb') {
       const onSite = v3len(v3sub(v3(b.pos.x, 0, b.pos.z), v3(game.round.sitePos.x, 0, game.round.sitePos.z))) <= game.round.siteRadius;
@@ -1896,7 +2143,8 @@ function updateBots(dt) {
             if (game.hp <= 0) {
               game.hp = 100;
               game.armor = 0;
-              game.pos = v3(0, 1.1, 10);
+              const spawn = randomSpawnFromTeam(game.team);
+              game.pos = v3(spawn.x, 1.1, spawn.z);
               game.vel = v3(0, 0, 0);
               setStatus('You died (respawn)', true);
               game.stats.deaths += 1;
@@ -1991,9 +2239,9 @@ function drawWorld() {
 
   for (const b of game.boxes) drawBox(b.pos, b.scale, b.color);
 
-  for (let i = 0; i < 18; i++) {
-    const x = -18 + ((i * 7) % 36);
-    const z = -18 + ((i * 11) % 36);
+  for (let i = 0; i < 22; i++) {
+    const x = -game.mapBounds + ((i * 9) % (game.mapBounds * 2));
+    const z = -game.mapBounds + ((i * 13) % (game.mapBounds * 2));
     const y = 10.5 + Math.sin(tSky + i) * 0.25;
     const puff = 1.2 + ((i % 3) * 0.45);
     const c = v3(0.96, 0.98, 1.0);
@@ -2001,12 +2249,26 @@ function drawWorld() {
   }
 
   if (game.mode === 'ai' && game.matchMode === 'bomb') {
-    const site = game.round.sitePos;
     const planted = game.round.bombPlanted;
-    const c = planted ? v3(1.0, 0.35, 0.25) : v3(0.98, 0.95, 0.85);
-    const padCol = planted ? v3(1.0, 0.6, 0.45) : v3(0.9, 0.92, 0.98);
-    drawBox(v3(site.x, site.y, site.z), v3(1.6, 0.06, 1.6), padCol);
-    drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), c);
+    for (const site of game.round.sites) {
+      const active = site.key === game.round.activeSite;
+      const plantedHere = site.key === game.round.plantSite;
+      const neutral = v3(0.9, 0.92, 0.98);
+      const activeCol = site.key === 'A' ? v3(0.58, 0.72, 1.0) : v3(0.92, 0.78, 0.52);
+      const plantedCol = v3(1.0, 0.58, 0.45);
+      const padCol = plantedHere ? plantedCol : active ? activeCol : neutral;
+      drawBox(v3(site.pos.x, site.pos.y, site.pos.z), v3(1.8, 0.06, 1.8), padCol);
+    }
+    if (planted) {
+      drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), v3(1.0, 0.35, 0.25));
+    }
+  }
+
+  if (game.mode === 'ai' && game.smoke.active.length > 0) {
+    for (const s of game.smoke.active) {
+      drawBox(v3(s.pos.x, s.pos.y, s.pos.z), v3(s.scale.x, s.scale.y, s.scale.z), v3(0.62, 0.66, 0.72));
+      drawBox(v3(s.pos.x, s.pos.y + 0.95, s.pos.z), v3(s.scale.x * 0.7, s.scale.y * 0.6, s.scale.z * 0.7), v3(0.78, 0.8, 0.84));
+    }
   }
 
   function drawHumanoid(pos, yaw, hp, maxHp, palette) {
@@ -2231,6 +2493,8 @@ function frame() {
   let dt = (t - last) / 1000;
   last = t;
   dt = Math.min(0.033, Math.max(0, dt));
+
+  updateSmoke(dt);
 
   if (game.pointerLocked) {
     updatePlayer(dt);
