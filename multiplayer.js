@@ -4,7 +4,7 @@
  */
 
 class MultiplayerClient {
-  constructor(serverUrl = 'http://123.60.21.129:3000') {
+  constructor(serverUrl = 'https://123.60.21.129:443') {
     this.serverUrl = serverUrl
     this.socket = null
     this.roomId = null
