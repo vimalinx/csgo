@@ -2500,13 +2500,14 @@ if (!uViewPos) missingUniforms.push('uViewPos');
 if (!uShadowMap) missingUniforms.push('uShadowMap');
 
 if (missingUniforms.length > 0) {
-  console.error('=== 着色器 Uniforms 错误 ===');
-  console.error('缺失的 uniforms:', missingUniforms);
-  console.error('着色器程序链接状态:', gl.getProgramParameter(program, gl.LINK_STATUS));
-  console.error('着色器程序信息:', gl.getProgramInfoLog(program));
-  console.error('顶点着色器长度:', VS.length);
-  console.error('片段着色器长度:', FS.length);
-  throw new Error(`Uniforms missing: ${missingUniforms.join(', ')}. Check console for details.`);
+  console.warn('=== 着色器 Uniforms 警告（已降级处理）===');
+  console.warn('缺失的 uniforms:', missingUniforms);
+  console.warn('着色器程序链接状态:', gl.getProgramParameter(program, gl.LINK_STATUS));
+  console.warn('着色器程序信息:', gl.getProgramInfoLog(program));
+  console.warn('顶点着色器长度:', VS.length);
+  console.warn('片段着色器长度:', FS.length);
+  console.warn('⚠️ 部分着色器特性可能不可用，但游戏可以继续运行');
+  // 不再抛出错误，改为降级处理（允许游戏继续运行）
 }
 
 const cube = buildCubeMesh();
