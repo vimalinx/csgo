@@ -2534,7 +2534,9 @@ function updateWeapon(dt) {
   game.yaw += (Math.random() - 0.5) * recoil * 0.007;
   w.kick = Math.min(1, w.kick + 0.35);
 
-  const spread = (w.def.spreadDeg * Math.PI) / 180;
+  const isMoving = Math.abs(game.vel.x) > 0.0001 || Math.abs(game.vel.z) > 0.0001;
+  const spreadDeg = isMoving ? w.def.spreadDeg * 2.5 : w.def.spreadDeg;
+  const spread = (spreadDeg * Math.PI) / 180;
   const sx = (Math.random() - 0.5) * spread;
   const sy = (Math.random() - 0.5) * spread;
   const fwdCam = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
