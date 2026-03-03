@@ -269,7 +269,13 @@ export function createRoomListUI(multiplayer, onJoinRoom, onBack) {
 
   // Setup room list listener
   multiplayer.onRoomList((roomList) => {
-    rooms = roomList || []
+    // 确保是数组
+    if (Array.isArray(roomList)) {
+      rooms = roomList
+    } else {
+      console.warn('⚠️ roomList is not an array:', roomList)
+      rooms = []
+    }
     renderRoomList()
   })
 
@@ -309,6 +315,17 @@ export function createRoomListUI(multiplayer, onJoinRoom, onBack) {
   }
 
   function renderRoomList() {
+    // 防御性检查
+    if (!Array.isArray(rooms)) {
+      console.warn('⚠️ rooms is not an array, using empty array')
+      rooms = []
+    }
+
+    if (!roomListContainer) {
+      console.error('❌ roomListContainer not found')
+      return
+    }
+
     roomListContainer.innerHTML = ''
 
     if (rooms.length === 0) {

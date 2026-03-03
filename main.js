@@ -2318,18 +2318,29 @@ let lastMoveSendTime = 0
 const MOVE_SEND_INTERVAL = 50 // Send every 50ms (20 times per second)
 
 function sendPlayerMovement() {
-  if (!multiplayer.isConnected || game.mode !== 'online') return
+  // 安全检查
+  if (!multiplayer || !multiplayer.isConnected || game.mode !== 'online') return
+
+  // 检查玩家是否初始化
+  if (!game.player || !game.player.pos) {
+    console.warn('⚠️ Player not initialized, skip movement sync')
+    return
+  }
   
   const now = Date.now()
   if (now - lastMoveSendTime < MOVE_SEND_INTERVAL) return
   
   lastMoveSendTime = now
   
-  multiplayer.sendMove(
-    game.player.pos,
-    { x: game.pitch, y: game.yaw, z: 0 },
-    game.vel
-  )
+  try {
+    multiplayer.sendMove(
+      game.player.pos,
+      { x: game.pitch, y: game.yaw, z: 0 },
+      game.vel || { x: 0, y: 0, z: 0 }
+    )
+  } catch (error) {
+    console.error('Failed to send movement:', error)
+  }
 }
 
 const glsys = new GL(canvas);
