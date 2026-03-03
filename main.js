@@ -851,6 +851,7 @@ class Game {
     this.keys = new Set();
     this.mouseDown = false;
     this.firePressed = false;
+    this.fireModeAuto = true; // 玩家可切换的开火模式
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.weaponIndex = 0;
@@ -1938,9 +1939,9 @@ function updateHud() {
   if (moneyTextEl) moneyTextEl.textContent = `$${Math.floor(game.econ.money)}`;
   ammoText.textContent = w ? `${w.mag} / ${w.reserve}` : '-- / --';
   if (fireModeHintEl) {
-    const mode = w && w.def.auto ? 'AUTO' : 'SEMI';
+    const mode = game.fireModeAuto ? 'AUTO' : 'SEMI';
     const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
-    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · ${mode}`;
+    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}`;
   }
 
   if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
@@ -2044,6 +2045,14 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     const shown = minimap.toggle();
     setStatus(`Minimap ${shown ? 'shown' : 'hidden'}`, false);
+    return;
+  }
+
+  if (e.code === 'KeyX' && game.pointerLocked) {
+    e.preventDefault();
+    game.fireModeAuto = !game.fireModeAuto;
+    const mode = game.fireModeAuto ? 'AUTO' : 'SEMI';
+    setStatus(`Fire mode: ${mode}`, false);
     return;
   }
 
@@ -2403,7 +2412,7 @@ function updateWeapon(dt) {
   }
 
   const fireHeld = game.mouseDown && game.pointerLocked;
-  const wantsFire = w.def.auto ? fireHeld || game.firePressed : game.firePressed;
+  const wantsFire = game.fireModeAuto ? fireHeld || game.firePressed : game.firePressed;
   if (!wantsFire) return;
   if (w.cooldown > 0) return;
   if (w.mag <= 0) {
