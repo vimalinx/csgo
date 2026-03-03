@@ -1144,6 +1144,12 @@ class Game {
   /**
    * 检测移动状态
    * @returns {'standing' | 'walking' | 'running' | 'jumping'}
+   * 
+   * 移动状态用于计算跑射散布：
+   * - standing（静止）：散布倍率 1.0（基准精度）
+   * - walking（走路）：散布倍率 1.3（精度下降 30%）
+   * - running（跑步）：散布倍率 1.6（精度下降 60%）
+   * - jumping（跳跃）：散布倍率 2.0（精度下降 100%，即散布翻倍）
    */
   getMovementState() {
     // 如果在空中，返回跳跃状态
@@ -1153,8 +1159,8 @@ class Game {
     const speed = Math.sqrt(this.vel.x ** 2 + this.vel.z ** 2);
     
     // 根据速度判断移动状态
-    // 跑步速度阈值：200 单位/秒（转换为游戏速度约为 6.8）
-    // 走路速度阈值：50 单位/秒（转换为游戏速度约为 2.0）
+    // 跑步速度阈值：6.0 单位/秒
+    // 走路速度阈值：2.0 单位/秒
     if (speed > 6.0) return 'running';
     if (speed > 2.0) return 'walking';
     return 'standing';
