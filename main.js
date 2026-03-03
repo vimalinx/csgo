@@ -62,6 +62,7 @@ const reloadWrap = document.getElementById('reloadWrap');
 const reloadBar = document.getElementById('reloadBar');
 const reloadText = document.getElementById('reloadText');
 const crosshairEl = document.querySelector('.crosshair');
+const scopeOverlayEl = document.getElementById('scopeOverlay');
 const objectiveEl = document.getElementById('objective');
 const objectiveText = document.getElementById('objectiveText');
 const objectiveTimer = document.getElementById('objectiveTimer');
@@ -877,6 +878,7 @@ class Game {
     this.keys = new Set();
     this.mouseDown = false;
     this.firePressed = false;
+    this.isAiming = false;
     this.fireModeAuto = true; // 玩家可切换的开火模式
     this.mouseDX = 0;
     this.mouseDY = 0;
@@ -1016,40 +1018,48 @@ class Game {
     this.targets.length = 0;
     this.bots.length = 0;
 
-    const wallColor = v3(0.18, 0.2, 0.27);
-    const coverColor = v3(0.2, 0.23, 0.29);
-    const heavy = v3(0.23, 0.24, 0.31);
+    const groundBaseColor = v3(0.1, 0.12, 0.16);
+    const groundCenterColor = v3(0.14, 0.2, 0.3);
+    const groundNorthColor = v3(0.24, 0.19, 0.14);
+    const groundSouthColor = v3(0.14, 0.22, 0.15);
+    const perimeterWallColor = v3(0.16, 0.23, 0.34);
+    const structureWallColor = v3(0.31, 0.27, 0.21);
+    const coverColor = v3(0.19, 0.34, 0.25);
+    const buildingColor = v3(0.64, 0.37, 0.23);
 
-    this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), v3(0.12, 0.14, 0.18), true));
-    this.boxes.push(makeBox(v3(0, 2, -28), v3(56, 6, 1), wallColor, true));
-    this.boxes.push(makeBox(v3(0, 2, 28), v3(56, 6, 1), wallColor, true));
-    this.boxes.push(makeBox(v3(-28, 2, 0), v3(1, 6, 56), wallColor, true));
-    this.boxes.push(makeBox(v3(28, 2, 0), v3(1, 6, 56), wallColor, true));
+    this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), groundBaseColor, true));
+    this.boxes.push(makeBox(v3(0, 0.02, 0), v3(22, 0.04, 56), groundCenterColor, false));
+    this.boxes.push(makeBox(v3(0, 0.02, -17), v3(56, 0.04, 18), groundNorthColor, false));
+    this.boxes.push(makeBox(v3(0, 0.02, 17), v3(56, 0.04, 18), groundSouthColor, false));
+    this.boxes.push(makeBox(v3(0, 2, -28), v3(56, 6, 1), perimeterWallColor, true));
+    this.boxes.push(makeBox(v3(0, 2, 28), v3(56, 6, 1), perimeterWallColor, true));
+    this.boxes.push(makeBox(v3(-28, 2, 0), v3(1, 6, 56), perimeterWallColor, true));
+    this.boxes.push(makeBox(v3(28, 2, 0), v3(1, 6, 56), perimeterWallColor, true));
 
-    this.boxes.push(makeBox(v3(-20, 1.6, -10), v3(5.0, 3.2, 18), heavy, true));
-    this.boxes.push(makeBox(v3(20, 1.6, 10), v3(5.0, 3.2, 18), heavy, true));
+    this.boxes.push(makeBox(v3(-20, 1.6, -10), v3(5.0, 3.2, 18), buildingColor, true));
+    this.boxes.push(makeBox(v3(20, 1.6, 10), v3(5.0, 3.2, 18), buildingColor, true));
 
-    this.boxes.push(makeBox(v3(-4, 1.5, -20), v3(8, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(8, 1.5, -20), v3(6, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(3, 1.5, -14), v3(2.2, 3, 8), wallColor, true));
-    this.boxes.push(makeBox(v3(11, 1.5, -12), v3(2.2, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(-4, 1.5, -20), v3(8, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(8, 1.5, -20), v3(6, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(3, 1.5, -14), v3(2.2, 3, 8), structureWallColor, true));
+    this.boxes.push(makeBox(v3(11, 1.5, -12), v3(2.2, 3, 6), structureWallColor, true));
 
     this.boxes.push(makeBox(v3(-6, 1.4, -10), v3(4.5, 2.8, 3), coverColor, true));
     this.boxes.push(makeBox(v3(10, 1.0, -16), v3(4, 2, 3), coverColor, true));
     this.boxes.push(makeBox(v3(15.5, 1.0, -9), v3(3, 2, 4), coverColor, true));
 
-    this.boxes.push(makeBox(v3(-3.5, 1.5, 0), v3(7, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(8, 1.5, 0), v3(6, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(2.2, 1.5, 6.5), v3(2.2, 3, 6), wallColor, true));
-    this.boxes.push(makeBox(v3(9.8, 1.5, -6.5), v3(2.2, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(-3.5, 1.5, 0), v3(7, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(8, 1.5, 0), v3(6, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(2.2, 1.5, 6.5), v3(2.2, 3, 6), structureWallColor, true));
+    this.boxes.push(makeBox(v3(9.8, 1.5, -6.5), v3(2.2, 3, 6), structureWallColor, true));
 
     this.boxes.push(makeBox(v3(-10, 1.0, 0), v3(4.8, 2, 3.2), coverColor, true));
     this.boxes.push(makeBox(v3(14, 1.0, 0), v3(3.2, 2, 3.2), coverColor, true));
 
-    this.boxes.push(makeBox(v3(-5, 1.5, 20), v3(7, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(7.5, 1.5, 20), v3(6.5, 3, 2.2), wallColor, true));
-    this.boxes.push(makeBox(v3(3, 1.5, 14), v3(2.2, 3, 8), wallColor, true));
-    this.boxes.push(makeBox(v3(11, 1.5, 12), v3(2.2, 3, 6), wallColor, true));
+    this.boxes.push(makeBox(v3(-5, 1.5, 20), v3(7, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(7.5, 1.5, 20), v3(6.5, 3, 2.2), structureWallColor, true));
+    this.boxes.push(makeBox(v3(3, 1.5, 14), v3(2.2, 3, 8), structureWallColor, true));
+    this.boxes.push(makeBox(v3(11, 1.5, 12), v3(2.2, 3, 6), structureWallColor, true));
 
     this.boxes.push(makeBox(v3(-7, 1.0, 10), v3(4.5, 2, 3), coverColor, true));
     this.boxes.push(makeBox(v3(10, 1.0, 16), v3(4, 2, 3), coverColor, true));
@@ -1926,11 +1936,13 @@ uniform vec3 uColor;
 uniform vec3 uLightDir;
 out vec3 vColor;
 void main() {
+  vec4 worldPos = uModel * vec4(aPos, 1.0);
   vec3 n = normalize(mat3(uModel) * aNor);
   float ndl = clamp(dot(n, normalize(-uLightDir)), 0.0, 1.0);
-  float lit = 0.32 + ndl * 0.68;
+  float heightLight = clamp((worldPos.y + 0.8) / 10.0, 0.0, 1.0);
+  float lit = (0.28 + ndl * 0.62) * mix(0.85, 1.18, heightLight);
   vColor = uColor * lit;
-  gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+  gl_Position = uProj * uView * worldPos;
 }
 `;
 
@@ -2037,6 +2049,9 @@ function updateHud() {
   const host = crosshairEl || hud;
   host.style.setProperty('--ch-gap', `${gap.toFixed(1)}px`);
   host.style.setProperty('--ch-len', `${len.toFixed(1)}px`);
+  const aimingActive = game.isAiming && game.pointerLocked && game.playerAlive;
+  hud.classList.toggle('hud--aiming', aimingActive);
+  if (scopeOverlayEl) scopeOverlayEl.classList.toggle('show', aimingActive);
 
   const r = game.round;
   const showObj = game.mode === 'ai';
@@ -2096,6 +2111,7 @@ document.addEventListener('pointerlockchange', () => {
   game.keys.clear();
   game.mouseDown = false;
   game.firePressed = false;
+  game.isAiming = false;
   if (game.pointerLocked) canvas.focus();
 });
 
@@ -2229,12 +2245,16 @@ document.addEventListener('mousedown', (e) => {
   }
   if (e.button === 2) {
     e.preventDefault();
-    game.cycleWeapon(1);
+    game.isAiming = true;
   }
 });
 
 document.addEventListener('mouseup', (e) => {
   if (e.button === 0) game.mouseDown = false;
+  if (e.button === 2) {
+    e.preventDefault();
+    game.isAiming = false;
+  }
 });
 
 document.addEventListener('contextmenu', (e) => {
@@ -2276,6 +2296,7 @@ window.addEventListener('blur', () => {
   game.keys.clear();
   game.mouseDown = false;
   game.firePressed = false;
+  game.isAiming = false;
   game.mouseDX = 0;
   game.mouseDY = 0;
 });
@@ -3163,7 +3184,8 @@ function updateBots(dt) {
 function drawWorld() {
   glsys.resize();
   const aspect = glsys.width / Math.max(1, glsys.height);
-  mat4Perspective(proj, (70 * Math.PI) / 180, aspect, 0.05, 120);
+  const fovDeg = game.isAiming ? 26 : 70;
+  mat4Perspective(proj, (fovDeg * Math.PI) / 180, aspect, 0.05, 120);
 
   const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
   const fwd = forwardFromYawPitch(game.yaw, game.pitch);
