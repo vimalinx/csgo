@@ -862,6 +862,7 @@ class WeaponState {
     this.kick = 0;
     this.shot = 0;
     this.flash = 0;
+    this.silencerOn = false; // 手枪消音器状态
   }
 }
 
@@ -991,8 +992,7 @@ class Game {
     this.weaponIndex = clamp(i, 0, this.weapons.length - 1);
     const w = this.getWeapon();
     if (!w) return;
-    weaponNameEl.textContent = w.def.name;
-    tipText.textContent = describeWeaponStats(w.def);
+    updateWeaponHUD(w);
   }
 
   switchWeaponBySlot(slot) {
@@ -1270,6 +1270,16 @@ function setOverlayVisible(visible) {
 function describeWeaponStats(def) {
   const fireMode = def.auto ? 'AUTO' : 'SEMI';
   return `伤害 ${def.damage} · 射速 ${def.rpm} · 后坐 ${def.recoil.toFixed(2)} · 精准 ${def.accuracy}% · ${fireMode}`;
+}
+
+function updateWeaponHUD(w) {
+  if (!w) return;
+  let name = w.def.name;
+  if (w.def.category === 'pistol' && w.silencerOn) {
+    name += ' [消音器]';
+  }
+  weaponNameEl.textContent = name;
+  tipText.textContent = describeWeaponStats(w.def);
 }
 
 function getWeaponStateById(id) {
