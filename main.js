@@ -1,6 +1,51 @@
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
-const startBtn = document.getElementById('startBtn');
+
+const screenLobby = document.getElementById('screenLobby');
+const screenAI = document.getElementById('screenAI');
+const screenPause = document.getElementById('screenPause');
+const screenSettings = document.getElementById('screenSettings');
+const screenResult = document.getElementById('screenResult');
+
+const btnModeAI = document.getElementById('btnModeAI');
+const btnModeOnline = document.getElementById('btnModeOnline');
+const btnLobbySettings = document.getElementById('btnLobbySettings');
+
+const teamCT = document.getElementById('teamCT');
+const teamT = document.getElementById('teamT');
+const diffEasy = document.getElementById('diffEasy');
+const diffNormal = document.getElementById('diffNormal');
+const diffHard = document.getElementById('diffHard');
+const modeEndless = document.getElementById('modeEndless');
+const modeMatch = document.getElementById('modeMatch');
+const modeBomb = document.getElementById('modeBomb');
+const botMinus = document.getElementById('botMinus');
+const botPlus = document.getElementById('botPlus');
+const botCountText = document.getElementById('botCountText');
+const btnStartAI = document.getElementById('btnStartAI');
+const btnBackToLobby = document.getElementById('btnBackToLobby');
+
+const btnResume = document.getElementById('btnResume');
+const btnRestart = document.getElementById('btnRestart');
+const btnPauseSettings = document.getElementById('btnPauseSettings');
+const btnReturnLobby = document.getElementById('btnReturnLobby');
+
+const resultTitle = document.getElementById('resultTitle');
+const resultDetail = document.getElementById('resultDetail');
+const resultBoard = document.getElementById('resultBoard');
+const btnResultRestart = document.getElementById('btnResultRestart');
+const btnResultLobby = document.getElementById('btnResultLobby');
+
+const volMasterMinus = document.getElementById('volMasterMinus');
+const volMasterPlus = document.getElementById('volMasterPlus');
+const volSfxMinus = document.getElementById('volSfxMinus');
+const volSfxPlus = document.getElementById('volSfxPlus');
+const volMusicMinus = document.getElementById('volMusicMinus');
+const volMusicPlus = document.getElementById('volMusicPlus');
+const volMasterText = document.getElementById('volMasterText');
+const volSfxText = document.getElementById('volSfxText');
+const volMusicText = document.getElementById('volMusicText');
+const btnSettingsBack = document.getElementById('btnSettingsBack');
 
 const hud = document.getElementById('hud');
 const statusEl = document.getElementById('status');
@@ -16,6 +61,10 @@ const reloadWrap = document.getElementById('reloadWrap');
 const reloadBar = document.getElementById('reloadBar');
 const reloadText = document.getElementById('reloadText');
 const crosshairEl = document.querySelector('.crosshair');
+const objectiveEl = document.getElementById('objective');
+const objectiveText = document.getElementById('objectiveText');
+const objectiveTimer = document.getElementById('objectiveTimer');
+const objectiveFill = document.getElementById('objectiveFill');
 
 canvas.tabIndex = 0;
 
@@ -297,6 +346,8 @@ class AudioBus {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.gSfx = 0.7;
+    this.gMusic = 0.0;
   }
 
   ensure() {
@@ -307,6 +358,13 @@ class AudioBus {
     this.master.connect(this.ctx.destination);
   }
 
+  setVolumes(master, sfx, music) {
+    if (!this.master) return;
+    this.master.gain.value = 0.18 * master;
+    this.gSfx = sfx;
+    this.gMusic = music;
+  }
+
   blip(freq, dur, wave) {
     if (!this.ctx || !this.master) return;
     const t0 = this.ctx.currentTime;
@@ -314,8 +372,9 @@ class AudioBus {
     const g = this.ctx.createGain();
     o.type = wave === 0 ? 'square' : wave === 1 ? 'sawtooth' : 'triangle';
     o.frequency.setValueAtTime(freq, t0);
+    const amp = 0.8 * this.gSfx;
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.8, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, amp), t0 + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     o.connect(g);
     g.connect(this.master);
@@ -486,8 +545,12 @@ function makeBot(id, pos) {
   return {
     id,
     pos,
+    spawn: v3(pos.x, pos.y, pos.z),
     vel: v3(0, 0, 0),
     yaw: 0,
+    team: 't',
+    kills: 0,
+    deaths: 0,
     half: v3(0.35, 0.9, 0.35),
     hp: 100,
     maxHp: 100,
@@ -520,8 +583,8 @@ const WEAPONS = [
     damage: 34,
     spreadDeg: 1.4,
     recoil: 0.9,
-    magSize: 12,
-    reserveMax: 36,
+    magSize: 30,
+    reserveMax: 90,
     reloadSec: 1.25,
     tip: '精准点射',
   },
@@ -582,6 +645,30 @@ class Game {
     this.crosshairGap = 9;
     this.crouchT = 0;
     this.landKick = 0;
+    this.mode = 'lobby';
+    this.uiScreen = 'lobby';
+    this.team = 'ct';
+    this.difficulty = 'normal';
+    this.botCount = 10;
+    this.matchMode = 'endless';
+    this.score = { ct: 0, t: 0, limit: 25 };
+    this.ending = false;
+    this.stats = { kills: 0, deaths: 0 };
+    this.round = {
+      state: 'idle',
+      tPlanting: false,
+      ctDefusing: false,
+      progress: 0,
+      plantLeft: 0,
+      defuseLeft: 0,
+      bombPlanted: false,
+      bombTimer: 0,
+      bombTotal: 35,
+      bombPos: v3(6, 0.05, 0),
+      sitePos: v3(6, 0.05, 0),
+      siteRadius: 2.5,
+    };
+    this.showingSettingsFrom = 'lobby';
     this.lastStatusAt = 0;
   }
 
@@ -630,6 +717,130 @@ class Game {
 }
 
 const game = new Game();
+
+showScreen('lobby');
+setOverlayVisible(true);
+
+function showScreen(name) {
+  const screens = [screenLobby, screenAI, screenPause, screenSettings, screenResult];
+  for (const s of screens) s.classList.add('hidden');
+  if (name === 'lobby') screenLobby.classList.remove('hidden');
+  if (name === 'ai') screenAI.classList.remove('hidden');
+  if (name === 'pause') screenPause.classList.remove('hidden');
+  if (name === 'settings') screenSettings.classList.remove('hidden');
+  if (name === 'result') screenResult.classList.remove('hidden');
+  game.uiScreen = name;
+}
+
+function showResult(title, detail) {
+  resultTitle.textContent = title;
+  resultDetail.textContent = detail;
+  const lines = [];
+  lines.push(`You (${game.team.toUpperCase()})  K/D: ${game.stats.kills}/${game.stats.deaths}`);
+  lines.push(`Score CT ${game.score.ct} : ${game.score.t} T`);
+  resultBoard.textContent = lines.join('\n');
+  setOverlayVisible(true);
+  showScreen('result');
+}
+
+function setOverlayVisible(visible) {
+  overlay.classList.toggle('hidden', !visible);
+  hud.style.display = visible ? 'none' : 'grid';
+}
+
+function applyDifficultyToBots() {
+  const d = game.difficulty;
+  let rpm = 200;
+  let spreadDeg = 3.2;
+  let dmg = 4;
+  if (d === 'normal') {
+    rpm = 240;
+    spreadDeg = 2.2;
+    dmg = 5;
+  }
+  if (d === 'hard') {
+    rpm = 300;
+    spreadDeg = 1.7;
+    dmg = 6;
+  }
+  for (const b of game.bots) {
+    b.weapon.rpm = rpm;
+    b.weapon.spreadDeg = spreadDeg;
+    b.weapon.damage = dmg;
+  }
+}
+
+function applyTeamToBots() {
+  for (const b of game.bots) {
+    b.team = b.id <= 5 ? 'ct' : 't';
+  }
+}
+
+function rebuildBots(count) {
+  game.bots.length = 0;
+  const ctSpots = [v3(-10, 0.0, 12), v3(-14, 0.0, 6), v3(-12, 0.0, 0), v3(-14, 0.0, -6), v3(-10, 0.0, -12)];
+  const tSpots = [v3(10, 0.0, 12), v3(14, 0.0, 6), v3(12, 0.0, 0), v3(14, 0.0, -6), v3(10, 0.0, -12)];
+  for (let i = 0; i < 5; i++) {
+    const jitter = v3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
+    const bot = makeBot(i + 1, v3add(ctSpots[i], jitter));
+    bot.team = 'ct';
+    game.bots.push(bot);
+  }
+  for (let i = 0; i < 5; i++) {
+    const jitter = v3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
+    const bot = makeBot(i + 6, v3add(tSpots[i], jitter));
+    bot.team = 't';
+    game.bots.push(bot);
+  }
+  applyDifficultyToBots();
+}
+
+function startAIMode() {
+  game.mode = 'ai';
+  game.hp = 100;
+  game.armor = 0;
+  game.pos = v3(0, 1.1, 10);
+  game.vel = v3(0, 0, 0);
+  game.crouchT = 0;
+  game.landKick = 0;
+  game.ending = false;
+  game.stats.kills = 0;
+  game.stats.deaths = 0;
+  game.buildMap();
+  game.score.ct = 0;
+  game.score.t = 0;
+  game.score.limit = 25;
+  game.round.state = game.matchMode === 'bomb' ? 'running' : 'idle';
+  game.round.tPlanting = false;
+  game.round.ctDefusing = false;
+  game.round.progress = 0;
+  game.round.plantLeft = 0;
+  game.round.defuseLeft = 0;
+  game.round.bombPlanted = false;
+  game.round.bombTimer = 0;
+  game.round.bombPos = v3(game.round.sitePos.x, game.round.sitePos.y, game.round.sitePos.z);
+  rebuildBots(10);
+
+  for (const ws of game.weapons) {
+    ws.mag = ws.def.magSize;
+    ws.reserve = game.matchMode === 'endless' ? 9999 : ws.def.reserveMax;
+    ws.reloading = false;
+    ws.reloadLeft = 0;
+    ws.cooldown = 0;
+    ws.kick = 0;
+    ws.shot = 0;
+    ws.flash = 0;
+  }
+
+  lockPointer();
+}
+
+function returnToLobby() {
+  game.mode = 'lobby';
+  unlockPointer();
+  setOverlayVisible(true);
+  showScreen('lobby');
+}
 
 const glsys = new GL(canvas);
 glsys.resize();
@@ -748,11 +959,21 @@ function updateHud() {
   const host = crosshairEl || hud;
   host.style.setProperty('--ch-gap', `${gap.toFixed(1)}px`);
   host.style.setProperty('--ch-len', `${len.toFixed(1)}px`);
-}
 
-function setOverlayVisible(visible) {
-  overlay.classList.toggle('hidden', !visible);
-  hud.style.display = visible ? 'none' : 'grid';
+  const r = game.round;
+  const showObj = game.matchMode === 'bomb' && game.mode === 'ai';
+  objectiveEl.classList.toggle('hidden', !showObj);
+  if (showObj) {
+    if (!r.bombPlanted) {
+      objectiveText.textContent = game.team === 't' ? 'Plant the bomb (E hold)' : 'Stop the plant';
+      objectiveTimer.textContent = '';
+      objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
+    } else {
+      objectiveText.textContent = game.team === 'ct' ? 'Defuse (E hold)' : 'Bomb planted';
+      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s`;
+      objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
+    }
+  }
 }
 
 function lockPointer() {
@@ -764,18 +985,22 @@ function unlockPointer() {
   document.exitPointerLock();
 }
 
-startBtn.addEventListener('click', () => {
-  lockPointer();
-});
-
 canvas.addEventListener('click', () => {
-  if (!game.pointerLocked) lockPointer();
+  if (!game.pointerLocked && game.mode === 'ai') lockPointer();
 });
 
 document.addEventListener('pointerlockchange', () => {
   game.pointerLocked = document.pointerLockElement === canvas;
   setOverlayVisible(!game.pointerLocked);
-  setStatus(game.pointerLocked ? 'In game' : 'Paused', false);
+  if (!game.pointerLocked && game.mode === 'ai') {
+    if (!game.ending && game.uiScreen !== 'result') {
+      showScreen('pause');
+      setStatus('Paused', false);
+    }
+  }
+  if (game.pointerLocked) {
+    setStatus('In game', false);
+  }
   game.keys.clear();
   game.mouseDown = false;
   game.firePressed = false;
@@ -796,6 +1021,9 @@ document.addEventListener('keydown', (e) => {
       e.code === 'Space' ||
       e.code === 'ShiftLeft' ||
       e.code === 'ShiftRight' ||
+      e.code === 'AltLeft' ||
+      e.code === 'AltRight' ||
+      e.code === 'KeyE' ||
       e.code === 'KeyR' ||
       e.code === 'Digit1' ||
       e.code === 'Digit2'
@@ -813,6 +1041,35 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
+
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (!(game.pointerLocked || game.mode === 'ai')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      const code = e.code;
+      const block =
+        code === 'KeyW' ||
+        code === 'KeyR' ||
+        code === 'KeyS' ||
+        code === 'KeyP' ||
+        code === 'KeyL' ||
+        code === 'KeyT' ||
+        code === 'KeyN' ||
+        code === 'KeyQ' ||
+        code === 'Tab' ||
+        code === 'F5' ||
+        code === 'F6' ||
+        code === 'F11';
+      if (block) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+  },
+  true
+);
+
 
 document.addEventListener('keyup', (e) => {
   game.keys.delete(e.code);
@@ -843,6 +1100,128 @@ window.addEventListener('blur', () => {
   game.mouseDY = 0;
 });
 
+btnModeAI.addEventListener('click', () => {
+  showScreen('ai');
+});
+
+btnBackToLobby.addEventListener('click', () => {
+  showScreen('lobby');
+});
+
+btnStartAI.addEventListener('click', () => {
+  audio.ensure();
+  startAIMode();
+});
+
+btnLobbySettings.addEventListener('click', () => {
+  game.showingSettingsFrom = 'lobby';
+  showScreen('settings');
+});
+
+btnPauseSettings.addEventListener('click', () => {
+  game.showingSettingsFrom = 'pause';
+  showScreen('settings');
+});
+
+btnSettingsBack.addEventListener('click', () => {
+  showScreen(game.showingSettingsFrom === 'pause' ? 'pause' : 'lobby');
+});
+
+btnResume.addEventListener('click', () => {
+  if (game.mode === 'ai') lockPointer();
+});
+
+btnRestart.addEventListener('click', () => {
+  if (game.mode === 'ai') {
+    startAIMode();
+  }
+});
+
+btnReturnLobby.addEventListener('click', () => {
+  returnToLobby();
+});
+
+btnResultLobby.addEventListener('click', () => {
+  returnToLobby();
+});
+
+btnResultRestart.addEventListener('click', () => {
+  if (game.mode === 'ai') startAIMode();
+});
+
+function setActiveOption(group, value) {
+  for (const [v, el] of Object.entries(group)) {
+    el.classList.toggle('active', v === value);
+  }
+}
+
+const teamButtons = { ct: teamCT, t: teamT };
+const diffButtons = { easy: diffEasy, normal: diffNormal, hard: diffHard };
+const modeButtons = { endless: modeEndless, match: modeMatch, bomb: modeBomb };
+
+function setTeam(value) {
+  game.team = value;
+  setActiveOption(teamButtons, value);
+}
+
+function setDifficulty(value) {
+  game.difficulty = value;
+  setActiveOption(diffButtons, value);
+}
+
+function setBotCount(value) {
+  game.botCount = clamp(value, 1, 12);
+  botCountText.textContent = '5v5';
+}
+
+function setMatchMode(value) {
+  game.matchMode = value;
+  setActiveOption(modeButtons, value);
+}
+
+teamCT.addEventListener('click', () => setTeam('ct'));
+teamT.addEventListener('click', () => setTeam('t'));
+diffEasy.addEventListener('click', () => setDifficulty('easy'));
+diffNormal.addEventListener('click', () => setDifficulty('normal'));
+diffHard.addEventListener('click', () => setDifficulty('hard'));
+botMinus.addEventListener('click', () => setBotCount(game.botCount - 1));
+botPlus.addEventListener('click', () => setBotCount(game.botCount + 1));
+
+modeEndless.addEventListener('click', () => setMatchMode('endless'));
+modeMatch.addEventListener('click', () => setMatchMode('match'));
+modeBomb.addEventListener('click', () => setMatchMode('bomb'));
+
+function setStepValue(textEl, next) {
+  textEl.textContent = String(next);
+}
+
+function stepVolume(textEl, delta) {
+  const cur = Number(textEl.textContent);
+  const next = clamp(cur + delta, 0, 100);
+  setStepValue(textEl, next);
+  applyVolumesFromUI();
+}
+
+function applyVolumesFromUI() {
+  const m = Number(volMasterText.textContent) / 100;
+  const s = Number(volSfxText.textContent) / 100;
+  const mu = Number(volMusicText.textContent) / 100;
+  audio.setVolumes(m, s, mu);
+}
+
+volMasterMinus.addEventListener('click', () => stepVolume(volMasterText, -5));
+volMasterPlus.addEventListener('click', () => stepVolume(volMasterText, 5));
+volSfxMinus.addEventListener('click', () => stepVolume(volSfxText, -5));
+volSfxPlus.addEventListener('click', () => stepVolume(volSfxText, 5));
+volMusicMinus.addEventListener('click', () => stepVolume(volMusicText, -5));
+volMusicPlus.addEventListener('click', () => stepVolume(volMusicText, 5));
+
+setTeam('ct');
+setDifficulty('normal');
+setBotCount(5);
+setMatchMode('endless');
+applyVolumesFromUI();
+
 document.addEventListener('mousemove', (e) => {
   if (!game.pointerLocked) return;
   const sens = 0.0022;
@@ -858,6 +1237,12 @@ function tryReload() {
   const w = game.getWeapon();
   if (w.reloading) return;
   if (w.mag >= w.def.magSize) return;
+  if (game.matchMode === 'endless') {
+    w.mag = w.def.magSize;
+    w.reserve = 9999;
+    setStatus('Infinite ammo', false);
+    return;
+  }
   if (w.reserve <= 0) {
     setStatus('No reserve ammo', true);
     return;
@@ -945,10 +1330,16 @@ function updateWeapon(dt) {
   if (!wantsFire) return;
   if (w.cooldown > 0) return;
   if (w.mag <= 0) {
-    setStatus('Empty! Press R', true);
-    w.cooldown = 0.15;
-    game.firePressed = false;
-    return;
+    if (game.matchMode === 'endless') {
+      w.mag = w.def.magSize;
+      w.reserve = 9999;
+      setStatus('Auto reload (endless)', false);
+    } else {
+      setStatus('Empty! Press R', true);
+      w.cooldown = 0.15;
+      game.firePressed = false;
+      return;
+    }
   }
 
   w.mag -= 1;
@@ -978,7 +1369,7 @@ function updateWeapon(dt) {
   const speed = Math.hypot(game.vel.x, game.vel.z);
 
   const crouchAcc = lerp(1, 0.22, game.crouchT);
-  const moveAcc = 1 + clamp01(speed / 6) * 2.2;
+  const moveAcc = 1 + clamp01(speed / 6) * 3.6;
   const airAcc = game.onGround ? 1 : 2.2;
   const landAcc = 1 + game.landKick * 1.8;
   const spreadAcc = crouchAcc * moveAcc;
@@ -1058,6 +1449,20 @@ function updateWeapon(dt) {
       bestTarget.alive = false;
       bestTarget.respawnAt = nowMs() + 2500;
       setStatus('Bot down', false);
+      game.stats.kills += 1;
+      if (game.matchMode === 'match') {
+        const killedTeam = bestTarget.team;
+        const myTeam = game.team;
+        const enemyTeam = myTeam === 'ct' ? 't' : 'ct';
+        if (killedTeam === enemyTeam) {
+          game.score[myTeam] += 1;
+        }
+        if (game.score[myTeam] >= game.score.limit) {
+          game.ending = true;
+          showResult(`${myTeam.toUpperCase()} Victory`, 'Score limit reached');
+          unlockPointer();
+        }
+      }
     } else {
       const z = bestZone ? ` ${bestZone}` : '';
       setStatus(`Hit${z}: -${dmg}`, false);
@@ -1116,9 +1521,102 @@ function updateHitmarker(dt) {
   if (game.hitmarker.t > 0) game.hitmarker.t = Math.max(0, game.hitmarker.t - dt);
 }
 
+function updateBombMode(dt) {
+  if (!(game.mode === 'ai' && game.matchMode === 'bomb')) return;
+  const r = game.round;
+
+  const site = r.sitePos;
+  const p = v3(game.pos.x, 0, game.pos.z);
+  const d = v3sub(p, v3(site.x, 0, site.z));
+  const inSite = v3len(d) <= r.siteRadius;
+  const holdingE = game.keys.has('KeyE');
+
+  if (!r.bombPlanted) {
+    if (inSite) {
+      setStatus(game.team === 't' ? 'Hold E to plant' : 'Protect site', false);
+    }
+  } else {
+    if (inSite) {
+      setStatus(game.team === 'ct' ? 'Hold E to defuse' : 'Defend the bomb', false);
+    }
+  }
+
+  if (!r.bombPlanted) {
+    r.tPlanting = false;
+    if (game.team === 't' && inSite && holdingE) {
+      r.plantLeft = r.plantLeft > 0 ? r.plantLeft : 3.0;
+      r.plantLeft -= dt;
+      r.progress = clamp01(1 - r.plantLeft / 3.0);
+      if (r.plantLeft <= 0) {
+        r.bombPlanted = true;
+        r.bombTimer = r.bombTotal;
+        r.bombPos = v3(site.x, site.y, site.z);
+        r.progress = 0;
+        setStatus('Bomb planted', false);
+      }
+    } else {
+      r.plantLeft = 0;
+      r.progress = Math.max(0, r.progress - dt * 2);
+    }
+
+    const aliveT = game.bots.filter((x) => x.alive && x.team === 't').length + (game.team === 't' ? 1 : 0);
+    const aliveCT = game.bots.filter((x) => x.alive && x.team === 'ct').length + (game.team === 'ct' ? 1 : 0);
+    if (aliveT === 0) {
+      game.ending = true;
+      showResult('CT Victory', 'T eliminated before planting');
+      unlockPointer();
+      }
+    if (aliveCT === 0) {
+      game.ending = true;
+      showResult('T Victory', 'CT eliminated');
+      unlockPointer();
+    }
+    return;
+  }
+
+  r.bombTimer -= dt;
+  if (r.bombTimer <= 0) {
+    game.ending = true;
+    showResult('T Victory', 'Bomb exploded');
+    unlockPointer();
+    return;
+  }
+
+  if (game.team === 'ct' && inSite && holdingE) {
+    r.ctDefusing = true;
+    r.defuseLeft = r.defuseLeft > 0 ? r.defuseLeft : 5.0;
+    r.defuseLeft -= dt;
+    r.progress = clamp01(1 - r.defuseLeft / 5.0);
+    if (r.defuseLeft <= 0) {
+      game.ending = true;
+      showResult('CT Victory', 'Bomb defused');
+      unlockPointer();
+      return;
+    }
+  } else {
+    r.ctDefusing = false;
+    r.defuseLeft = 0;
+    r.progress = Math.max(0, r.progress - dt * 2);
+  }
+
+  const aliveT = game.bots.filter((x) => x.alive && x.team === 't').length + (game.team === 't' ? 1 : 0);
+  if (aliveT === 0) {
+    game.ending = true;
+    showResult('CT Victory', 'T eliminated after planting');
+    unlockPointer();
+  }
+
+  const aliveCT = game.bots.filter((x) => x.alive && x.team === 'ct').length + (game.team === 'ct' ? 1 : 0);
+  if (aliveCT === 0) {
+    game.ending = true;
+    showResult('T Victory', 'CT eliminated');
+    unlockPointer();
+  }
+}
+
 function updatePlayer(dt) {
-  const sprint = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
-  const crouching = game.keys.has('ControlLeft') || game.keys.has('ControlRight');
+  const crouching = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
+  const sprint = game.keys.has('AltLeft') || game.keys.has('AltRight');
   const baseSpeed = sprint ? 6.8 : 4.8;
   const maxSpeed = crouching ? baseSpeed * 0.55 : baseSpeed;
   const accel = game.onGround ? 45 : 18;
@@ -1202,12 +1700,14 @@ function updateTargets(dt) {
 
 function updateBots(dt) {
   const tNow = nowMs();
-  const playerEye = v3(game.pos.x, game.pos.y + 1.6, game.pos.z);
+  const playerEye = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+  const aliveBots = game.bots.filter((x) => x.alive);
   for (const b of game.bots) {
     if (!b.alive) {
-      if (tNow >= b.respawnAt) {
+      if (game.matchMode === 'endless' && tNow >= b.respawnAt) {
         b.alive = true;
         b.hp = b.maxHp;
+        b.pos = v3(b.spawn.x, b.spawn.y, b.spawn.z);
       }
       continue;
     }
@@ -1225,12 +1725,71 @@ function updateBots(dt) {
       }
     }
 
-    const toPlayer = v3sub(playerEye, v3(b.pos.x, b.pos.y + 1.6, b.pos.z));
-    const dist = v3len(toPlayer);
-    const dir = dist > 1e-5 ? v3scale(toPlayer, 1 / dist) : v3(0, 0, 1);
-    b.yaw = Math.atan2(dir.x, dir.z);
-
     const lookFrom = v3(b.pos.x, b.pos.y + 1.6, b.pos.z);
+
+    let bestEnemy = null;
+    let bestEnemyDist = Infinity;
+    for (const other of aliveBots) {
+      if (other.id === b.id) continue;
+      if (other.team === b.team) continue;
+      const oEye = v3(other.pos.x, other.pos.y + 1.6, other.pos.z);
+      const d = v3sub(oEye, lookFrom);
+      const L = v3len(d);
+      if (L < bestEnemyDist) {
+        bestEnemyDist = L;
+        bestEnemy = other;
+      }
+    }
+
+    let targetType = 'none';
+    let targetBot = null;
+    let targetPos = null;
+    let dist = Infinity;
+
+    if (bestEnemy) {
+      targetType = 'bot';
+      targetBot = bestEnemy;
+      targetPos = v3(bestEnemy.pos.x, bestEnemy.pos.y + 1.6, bestEnemy.pos.z);
+      dist = bestEnemyDist;
+    }
+
+    if (game.team !== b.team) {
+      const dPlayer = v3len(v3sub(playerEye, lookFrom));
+      if (dPlayer < dist) {
+        targetType = 'player';
+        targetBot = null;
+        targetPos = playerEye;
+        dist = dPlayer;
+      }
+    }
+
+    if (game.matchMode === 'bomb' && !game.round.bombPlanted && b.team === 't') {
+      const site = game.round.sitePos;
+      const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
+      if (dSite < dist) {
+        targetType = 'site';
+        targetBot = null;
+        targetPos = v3(site.x, lookFrom.y, site.z);
+        dist = dSite;
+      }
+    }
+
+    if (game.matchMode === 'bomb' && game.round.bombPlanted && b.team === 'ct') {
+      const site = game.round.sitePos;
+      const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
+      if (dSite < dist) {
+        targetType = 'site';
+        targetBot = null;
+        targetPos = v3(site.x, lookFrom.y, site.z);
+        dist = dSite;
+      }
+    }
+
+    if (!targetPos) continue;
+
+    const toTarget = v3sub(targetPos, lookFrom);
+    const dir = dist > 1e-5 ? v3scale(toTarget, 1 / dist) : v3(0, 0, 1);
+    b.yaw = Math.atan2(dir.x, dir.z);
     let occluded = false;
     for (const c of game.colliders) {
       const t = rayAabb(lookFrom, dir, c);
@@ -1240,7 +1799,7 @@ function updateBots(dt) {
       }
     }
 
-    const shouldChase = dist < 16 && !occluded;
+    const shouldChase = dist < 18 && !occluded;
     b.state = shouldChase ? 'chase' : 'patrol';
 
     let wish = v3(0, 0, 0);
@@ -1253,7 +1812,7 @@ function updateBots(dt) {
     }
     wish = v3norm(wish);
 
-    const speed = b.state === 'chase' ? 2.6 : 1.6;
+    const speed = b.state === 'chase' ? 2.8 : 1.6;
     b.vel.x = wish.x * speed;
     b.vel.z = wish.z * speed;
     b.vel.y += -18.5 * dt;
@@ -1266,7 +1825,17 @@ function updateBots(dt) {
     b.pos.x = clamp(b.pos.x, -18.2, 18.2);
     b.pos.z = clamp(b.pos.z, -18.2, 18.2);
 
-    if (shouldChase && dist < 20 && !occluded && b.shootCooldown <= 0) {
+    if (game.matchMode === 'bomb') {
+      const onSite = v3len(v3sub(v3(b.pos.x, 0, b.pos.z), v3(game.round.sitePos.x, 0, game.round.sitePos.z))) <= game.round.siteRadius;
+      if (!game.round.bombPlanted && b.team === 't' && onSite) {
+        game.round.tPlanting = true;
+      }
+      if (game.round.bombPlanted && b.team === 'ct' && onSite) {
+        game.round.ctDefusing = true;
+      }
+    }
+
+    if (shouldChase && dist < 24 && !occluded && b.shootCooldown <= 0 && targetType !== 'site') {
       if (!bw.reloading && bw.mag <= 0) {
         bw.reloading = true;
         bw.reloadTotal = bw.reloadSec;
@@ -1286,24 +1855,85 @@ function updateBots(dt) {
 
         const muzzle = v3add(lookFrom, v3add(v3scale(v3norm(v3cross(v3(0, 1, 0), shotDir)), 0.18), v3scale(shotDir, 0.55)));
         const end = v3add(muzzle, v3scale(shotDir, Math.min(dist + 4, 80)));
+
+        let blocked = false;
+        for (const ally of aliveBots) {
+          if (!ally.alive) continue;
+          if (ally.id === b.id) continue;
+          if (ally.team !== b.team) continue;
+          const center = v3(ally.pos.x, ally.pos.y + ally.half.y, ally.pos.z);
+          const aabb = aabbFromCenter(center, ally.half);
+          const tHit = rayAabb(muzzle, shotDir, aabb);
+          if (tHit !== null && tHit > 0 && tHit < dist) {
+            blocked = true;
+            break;
+          }
+        }
+
+        if (!blocked && game.team === b.team) {
+          const pAabb = playerAabb(game.pos);
+          const tHit = rayAabb(muzzle, shotDir, pAabb);
+          if (tHit !== null && tHit > 0 && tHit < dist) {
+            blocked = true;
+          }
+        }
+
+        if (blocked) {
+          b.shootCooldown = 0.18;
+          continue;
+        }
+
         game.tracers.push({ a: muzzle, b: end, travel: 0, speed: 95, life: 0.32, hue: 0.02 });
 
-        const hitChance = clamp01((22 - dist) / 22);
-        if (Math.random() < 0.02 + 0.12 * hitChance) {
-          game.hp -= bw.damage;
-          if (game.hp <= 0) {
-            game.hp = 100;
-            game.armor = 0;
-            game.pos = v3(0, 1.1, 10);
-            game.vel = v3(0, 0, 0);
-            setStatus('You died (respawn)', true);
-          } else {
-            setStatus('Hit by bot', true);
+        const hitChance = clamp01((26 - dist) / 26);
+        if (Math.random() < 0.02 + 0.11 * hitChance) {
+          if (targetType === 'player') {
+            if (game.team === b.team) {
+              b.shootCooldown = 0.18;
+              continue;
+            }
+            game.hp -= bw.damage;
+            if (game.hp <= 0) {
+              game.hp = 100;
+              game.armor = 0;
+              game.pos = v3(0, 1.1, 10);
+              game.vel = v3(0, 0, 0);
+              setStatus('You died (respawn)', true);
+              game.stats.deaths += 1;
+            } else {
+              setStatus('Hit by bot', true);
+            }
+          } else if (targetType === 'bot' && targetBot) {
+            if (targetBot.team === b.team) {
+              b.shootCooldown = 0.18;
+              continue;
+            }
+            targetBot.hp -= bw.damage;
+            if (targetBot.hp <= 0) {
+              targetBot.alive = false;
+              if (game.matchMode === 'endless') targetBot.respawnAt = nowMs() + 2500;
+              if (game.matchMode === 'match') game.score[b.team] += 1;
+              if (game.matchMode === 'bomb') {
+                if (game.round.bombPlanted) {
+                }
+              }
+            }
           }
         }
       } else {
         b.shootCooldown = 0.18;
       }
+    }
+  }
+
+  if (game.matchMode === 'match') {
+    const myTeam = game.team;
+    const enemyTeam = myTeam === 'ct' ? 't' : 'ct';
+    const aliveEnemy = game.bots.filter((x) => x.alive && x.team === enemyTeam).length;
+    if (aliveEnemy === 0) {
+      game.ending = true;
+      showResult(`${myTeam.toUpperCase()} Victory`, 'Enemy eliminated');
+      unlockPointer();
     }
   }
 }
@@ -1318,7 +1948,10 @@ function drawWorld() {
   const camTarget = v3add(camPos, fwd);
   mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
 
-  gl.clearColor(0.03, 0.045, 0.07, 1);
+  const tSky = nowMs() * 0.00005;
+  const skyA = v3(0.78, 0.88, 1.0);
+  const skyB = v3(0.92, 0.96, 1.0);
+  gl.clearColor(lerp(skyA.x, skyB.x, 0.7), lerp(skyA.y, skyB.y, 0.7), lerp(skyA.z, skyB.z, 0.7), 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.useProgram(program);
   gl.uniformMatrix4fv(uProj, false, proj);
@@ -1358,6 +1991,24 @@ function drawWorld() {
 
   for (const b of game.boxes) drawBox(b.pos, b.scale, b.color);
 
+  for (let i = 0; i < 18; i++) {
+    const x = -18 + ((i * 7) % 36);
+    const z = -18 + ((i * 11) % 36);
+    const y = 10.5 + Math.sin(tSky + i) * 0.25;
+    const puff = 1.2 + ((i % 3) * 0.45);
+    const c = v3(0.96, 0.98, 1.0);
+    drawBox(v3(x, y, z), v3(3.6 * puff, 0.6, 2.2 * puff), c);
+  }
+
+  if (game.mode === 'ai' && game.matchMode === 'bomb') {
+    const site = game.round.sitePos;
+    const planted = game.round.bombPlanted;
+    const c = planted ? v3(1.0, 0.35, 0.25) : v3(0.98, 0.95, 0.85);
+    const padCol = planted ? v3(1.0, 0.6, 0.45) : v3(0.9, 0.92, 0.98);
+    drawBox(v3(site.x, site.y, site.z), v3(1.6, 0.06, 1.6), padCol);
+    drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), c);
+  }
+
   function drawHumanoid(pos, yaw, hp, maxHp, palette) {
     const hurt = 1 - clamp01(hp / maxHp);
     const baseCol = v3(
@@ -1391,18 +2042,27 @@ function drawWorld() {
     drawOrientedBox(v3add(hip, v3(0.18, 0.78, 0.48)), r, u, f, v3(0.16, 0.12, 0.62), gunCol);
   }
 
-  const botPalette = {
-    body: v3(0.22, 0.42, 0.35),
-    hurt: v3(0.95, 0.2, 0.22),
-    head: v3(0.18, 0.2, 0.22),
-    arm: v3(0.2, 0.32, 0.28),
-    leg: v3(0.16, 0.22, 0.2),
-    gun: v3(0.12, 0.12, 0.14),
-  };
-
   for (const bot of game.bots) {
     if (!bot.alive) continue;
-    drawHumanoid(bot.pos, bot.yaw, bot.hp, bot.maxHp, botPalette);
+    const pal =
+      bot.team === 'ct'
+        ? {
+            body: v3(0.2, 0.34, 0.75),
+            hurt: v3(0.95, 0.2, 0.22),
+            head: v3(0.14, 0.18, 0.28),
+            arm: v3(0.18, 0.26, 0.58),
+            leg: v3(0.14, 0.2, 0.42),
+            gun: v3(0.12, 0.12, 0.14),
+          }
+        : {
+            body: v3(0.78, 0.62, 0.16),
+            hurt: v3(0.95, 0.2, 0.22),
+            head: v3(0.28, 0.22, 0.1),
+            arm: v3(0.58, 0.46, 0.12),
+            leg: v3(0.42, 0.34, 0.1),
+            gun: v3(0.12, 0.12, 0.14),
+          };
+    drawHumanoid(bot.pos, bot.yaw, bot.hp, bot.maxHp, pal);
   }
 
   const playerPalette = {
@@ -1580,6 +2240,7 @@ function frame() {
     updateShells(dt);
     updateTracers(dt);
     updateHitmarker(dt);
+    updateBombMode(dt);
   }
 
   if (t - game.lastStatusAt > 2500 && game.pointerLocked) {
@@ -1592,5 +2253,5 @@ function frame() {
 }
 
 setOverlayVisible(true);
-setStatus('Click Start to lock pointer', false);
+setStatus('Lobby', false);
 requestAnimationFrame(frame);

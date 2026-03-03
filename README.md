@@ -23,7 +23,8 @@ http://localhost:5173/
 - 点击页面进入游戏（Pointer Lock）
 - W/A/S/D：移动
 - Space：跳跃
-- Shift：冲刺
+- Shift：下蹲
+- Alt：冲刺
 - 鼠标左键：射击
 - R：换弹
 - 1 / 2：切换武器

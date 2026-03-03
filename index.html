@@ -12,21 +12,128 @@
   <body>
     <div id="overlay" class="overlay">
       <div class="panel">
-        <h1>HTML5 WebGL FPS Demo</h1>
-        <p>
-          这是一个<strong>纯 HTML5 + 原生 JS + WebGL2</strong> 实现的 3D 第一人称射击演示（不使用任何外部库）。
-          目标是给你一个可运行、可扩展的“CS 风格”基础：鼠标锁定、移动跳跃、碰撞、地图、武器、命中与 HUD。
-        </p>
-        <ul>
-          <li>点击页面进入游戏（Pointer Lock）</li>
-          <li>W/A/S/D 移动，Space 跳跃，Shift 冲刺，R 换弹</li>
-          <li>1/2 切换武器，鼠标左键射击，Esc 退出指针锁定</li>
-        </ul>
-        <p class="small">
-          注意：这不是商业游戏《CS:GO》的完整复刻（完整地图/枪械/网络/动画/音效/经济系统等规模巨大且含版权）。
-          但它是一个完整可玩的 3D FPS 单机 Demo，可以持续迭代。
-        </p>
-        <button id="startBtn" class="btn">开始</button>
+        <div class="panel__header">
+          <h1>FPS Lobby</h1>
+          <div class="small" id="buildText">Local Demo</div>
+        </div>
+
+        <div id="screenLobby" class="screen">
+          <p class="small">
+            选择模式进入游戏。联机模式先占位，当前优先完成 AI 对战模式。
+          </p>
+          <div class="grid">
+            <button id="btnModeAI" class="btn btn--tile">AI 对战</button>
+            <button id="btnModeOnline" class="btn btn--tile btn--disabled" disabled>联机模式（占位）</button>
+          </div>
+
+          <div class="divider"></div>
+          <div class="row">
+            <button id="btnLobbySettings" class="btn btn--ghost">设置</button>
+          </div>
+        </div>
+
+        <div id="screenAI" class="screen hidden">
+          <h2>AI 对战设置</h2>
+          <div class="form">
+            <div class="block">
+              <div class="block__title">阵营</div>
+              <div class="tiles">
+                <button id="teamCT" class="btn btn--tile btn--option" data-value="ct">反恐精英（CT）</button>
+                <button id="teamT" class="btn btn--tile btn--option" data-value="t">恐怖分子（T）</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block__title">AI 难度</div>
+              <div class="tiles">
+                <button id="diffEasy" class="btn btn--tile btn--option" data-value="easy">简单</button>
+                <button id="diffNormal" class="btn btn--tile btn--option" data-value="normal">普通</button>
+                <button id="diffHard" class="btn btn--tile btn--option" data-value="hard">困难</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block__title">Bot 数量</div>
+              <div class="stepper">
+                <button id="botMinus" class="btn btn--ghost" aria-label="Decrease bots" disabled>-</button>
+                <div class="stepper__value mono" id="botCountText">5v5</div>
+                <button id="botPlus" class="btn btn--ghost" aria-label="Increase bots" disabled>+</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block__title">模式</div>
+              <div class="tiles">
+                <button id="modeEndless" class="btn btn--tile btn--option" data-value="endless">无限模式</button>
+                <button id="modeMatch" class="btn btn--tile btn--option" data-value="match">对局模式</button>
+                <button id="modeBomb" class="btn btn--tile btn--option" data-value="bomb">爆破模式</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="btnStartAI" class="btn">启动游戏</button>
+            <button id="btnBackToLobby" class="btn btn--ghost">返回大厅</button>
+          </div>
+        </div>
+
+        <div id="screenPause" class="screen hidden">
+          <h2>暂停</h2>
+          <div class="row">
+            <button id="btnResume" class="btn">继续</button>
+            <button id="btnRestart" class="btn">重新开始</button>
+          </div>
+          <div class="row">
+            <button id="btnPauseSettings" class="btn btn--ghost">设置</button>
+            <button id="btnReturnLobby" class="btn btn--ghost">返回大厅</button>
+          </div>
+        </div>
+
+        <div id="screenResult" class="screen hidden">
+          <h2 id="resultTitle">Result</h2>
+          <p id="resultDetail" class="small"></p>
+          <div id="resultBoard" class="board mono"></div>
+          <div class="row">
+            <button id="btnResultRestart" class="btn">重新开始</button>
+            <button id="btnResultLobby" class="btn btn--ghost">返回大厅</button>
+          </div>
+        </div>
+
+        <div id="screenSettings" class="screen hidden">
+          <h2>设置</h2>
+          <div class="form">
+            <div class="block">
+              <div class="block__title">主音量</div>
+              <div class="stepper">
+                <button id="volMasterMinus" class="btn btn--ghost">-</button>
+                <div class="stepper__value mono" id="volMasterText">40</div>
+                <button id="volMasterPlus" class="btn btn--ghost">+</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block__title">音效</div>
+              <div class="stepper">
+                <button id="volSfxMinus" class="btn btn--ghost">-</button>
+                <div class="stepper__value mono" id="volSfxText">70</div>
+                <button id="volSfxPlus" class="btn btn--ghost">+</button>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="block__title">音乐</div>
+              <div class="stepper">
+                <button id="volMusicMinus" class="btn btn--ghost">-</button>
+                <div class="stepper__value mono" id="volMusicText">0</div>
+                <button id="volMusicPlus" class="btn btn--ghost">+</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="btnSettingsBack" class="btn">返回</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -35,6 +142,13 @@
     <div id="hud" class="hud" aria-hidden="true">
       <div class="hud__top">
         <div id="status" class="status"></div>
+        <div id="objective" class="objective" aria-hidden="true">
+          <div class="objective__row">
+            <div id="objectiveText" class="objective__text">Objective</div>
+            <div id="objectiveTimer" class="objective__timer mono">0.0</div>
+          </div>
+          <div class="objective__track"><div id="objectiveFill" class="objective__fill"></div></div>
+        </div>
       </div>
       <div class="hud__bottom">
         <div class="hud__left">
