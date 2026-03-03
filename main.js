@@ -1,3 +1,7 @@
+// Multiplayer imports
+import MultiplayerClient from './multiplayer.js'
+import { createLoginUI, createRoomListUI, createMultiplayerHUD } from './multiplayer-ui.js'
+
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
 
@@ -1408,6 +1412,11 @@ const minimap = new Minimap(hud, game);
 ensureMinimapActive();
 resetPlayerLoadout();
 
+// Multiplayer state
+const multiplayer = new MultiplayerClient();
+let multiplayerHUD = null;
+let otherPlayers = new Map(); // Store other players' data
+
 function ensureMinimapActive() {
   minimap.setVisible(true);
   if (hud) hud.classList.add('hud--with-minimap');
@@ -2138,6 +2147,189 @@ function returnToLobby() {
   unlockPointer();
   setOverlayVisible(true);
   showScreen('lobby');
+  
+  // Clean up multiplayer if active
+  if (multiplayer.isConnected) {
+    multiplayer.disconnect()
+    if (multiplayerHUD) {
+      multiplayerHUD.remove()
+      multiplayerHUD = null
+    }
+    otherPlayers.clear()
+  }
+}
+
+/**
+ * Start online multiplayer mode
+ */
+async function startOnlineMode() {
+  try {
+    // Try to connect to server
+    setStatus('连接服务器中...', false)
+    await multiplayer.connect()
+    
+    // Show login UI
+    createLoginUI(multiplayer, (username) => {
+      console.log(`玩家 ${username} 登录成功`)
+      // After login, show room list
+      createRoomListUI(multiplayer, (roomId, roomName) => {
+        console.log(`加入房间: ${roomName} (${roomId})`)
+        // Start multiplayer game
+        startMultiplayerGame(roomId, roomName)
+      }, () => {
+        // Back button pressed
+        multiplayer.disconnect()
+        showScreen('lobby')
+      })
+    })
+  } catch (error) {
+    console.error('连接失败:', error)
+    alert('无法连接到服务器: ' + error.message)
+    showScreen('lobby')
+  }
+}
+
+/**
+ * Start the multiplayer game session
+ */
+function startMultiplayerGame(roomId, roomName) {
+  setMatchMode('bomb')
+  
+  game.mode = 'online'
+  game.roomName = roomName
+  showScreen('ai') // Reuse AI screen for now
+  setOverlayVisible(false)
+  ensureMinimapActive()
+  
+  game.playerAlive = true
+  closeBuyMenu()
+  resetPlayerLoadout()
+  respawnPlayer()
+  
+  game.vel = v3(0, 0, 0)
+  game.crouchT = 0
+  game.landKick = 0
+  game.ending = false
+  game.stats.kills = 0
+  game.stats.deaths = 0
+  game.isAiming = false
+  game.scope = {
+    active: false,
+    zoomLevel: 1,
+    targetZoom: 1,
+    transitioning: false,
+  }
+  
+  game.buildMap()
+  game.score.ct = 0
+  game.score.t = 0
+  game.score.limit = 25
+  game.round.state = 'freeze'
+  game.round.tPlanting = false
+  game.round.ctDefusing = false
+  game.round.progress = 0
+  game.round.plantLeft = 0
+  game.round.defuseLeft = 0
+  game.round.bombPlanted = false
+  game.round.bombTimer = 0
+  game.round.roundNum = 0
+  game.round.winner = ''
+  game.round.reason = ''
+  game.round.postLeft = 0
+  game.round.freezeLeft = game.round.freezeTotal
+  game.round.roundLeft = game.round.roundTotal
+  
+  game.smoke.active = []
+  game.smoke.cooldown = 0
+  game.smoke.charges = 0
+  game.flashbang.cooldown = 0
+  game.flashbang.charges = 0
+  
+  rebuildGameplayColliders()
+  // Don't spawn bots in multiplayer mode
+  game.bots = []
+  game.econ.money = game.econ.initialMoney
+  
+  prepareNewBombRound()
+  
+  // Create multiplayer HUD
+  multiplayerHUD = createMultiplayerHUD(multiplayer)
+  
+  // Setup multiplayer event listeners
+  setupMultiplayerListeners()
+  
+  lockPointer()
+}
+
+/**
+ * Setup multiplayer event listeners
+ */
+function setupMultiplayerListeners() {
+  // Listen for other players' movement
+  multiplayer.onPlayerMove((data) => {
+    if (data.playerId !== multiplayer.playerId) {
+      otherPlayers.set(data.playerId, {
+        position: data.position,
+        rotation: data.rotation,
+        velocity: data.velocity,
+        timestamp: Date.now()
+      })
+    }
+  })
+  
+  // Listen for other players joining
+  multiplayer.onPlayerJoined((data) => {
+    console.log(`玩家加入: ${data.username}`)
+    setStatus(`${data.username} 加入了游戏`, false)
+  })
+  
+  // Listen for other players leaving
+  multiplayer.onPlayerLeft((data) => {
+    console.log(`玩家离开: ${data.username}`)
+    otherPlayers.delete(data.playerId)
+    setStatus(`${data.username} 离开了游戏`, false)
+  })
+  
+  // Listen for shooting events
+  multiplayer.onPlayerShoot((data) => {
+    if (data.playerId !== multiplayer.playerId) {
+      // Handle other player shooting
+      console.log(`玩家 ${data.playerId} 开枪`)
+    }
+  })
+  
+  // Handle disconnection
+  multiplayer.onDisconnect(() => {
+    console.log('与服务器的连接断开')
+    alert('与服务器的连接断开')
+    returnToLobby()
+  })
+  
+  multiplayer.onError((error) => {
+    console.error('多人游戏错误:', error)
+    setStatus('网络错误: ' + error, true)
+  })
+}
+
+/**
+ * Send player movement to server (called from game loop)
+ */
+let lastMoveSendTime = 0
+const MOVE_SEND_INTERVAL = 50 // Send every 50ms (20 times per second)
+
+function sendPlayerMovement() {
+  if (!multiplayer.isConnected || game.mode !== 'online') return
+  
+  const now = Date.now()
+  if (now - lastMoveSendTime < MOVE_SEND_INTERVAL) return
+  
+  lastMoveSendTime = now
+  
+  multiplayer.sendMove(
+    game.player.pos,
+    { x: game.pitch, y: game.yaw, z: 0 },
+    game.vel
+  )
 }
 
 const glsys = new GL(canvas);
@@ -2785,6 +2977,10 @@ window.addEventListener('blur', () => {
 
 btnModeAI.addEventListener('click', () => {
   showScreen('ai');
+});
+
+btnModeOnline.addEventListener('click', () => {
+  startOnlineMode();
 });
 
 btnBackToLobby.addEventListener('click', () => {
@@ -3912,6 +4108,35 @@ function drawWorld() {
     drawHumanoid(bot.pos, bot.yaw, bot.hp, bot.maxHp, pal);
   }
 
+  // Draw other players in multiplayer mode
+  if (game.mode === 'online') {
+    for (const [playerId, playerData] of otherPlayers) {
+      const pos = playerData.position
+      const rotation = playerData.rotation
+      
+      // Use CT palette for other players (can be customized later)
+      const pal = {
+        body: v3(0.22, 0.38, 0.78),
+        hurt: v3(0.95, 0.22, 0.24),
+        head: v3(0.15, 0.20, 0.30),
+        arm: v3(0.20, 0.30, 0.62),
+        leg: v3(0.16, 0.22, 0.45),
+        gun: v3(0.12, 0.12, 0.14),
+      }
+      
+      // Convert rotation to yaw (pitch is used for looking up/down, yaw for left/right)
+      const yaw = rotation.y || 0
+      
+      drawHumanoid(
+        v3(pos.x, pos.y, pos.z),
+        yaw,
+        100, // HP (we don't track other players' HP yet)
+        100,
+        pal
+      )
+    }
+  }
+
   const playerPalette = {
     body: v3(0.24, 0.24, 0.42),
     hurt: v3(0.95, 0.22, 0.24),
@@ -4116,6 +4341,9 @@ function frame() {
   if (game.pointerLocked) {
     updatePlayer(dt);
     updateWeapon(dt);
+    
+    // Send multiplayer movement
+    sendPlayerMovement()
   }
 
   if (game.pointerLocked || aiRunning) {
