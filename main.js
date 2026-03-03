@@ -687,6 +687,7 @@ const WEAPON_DEFS = [
     auto: false,
     damage: 50,
     spreadDeg: 0,
+    spreadMultiplier: 1.0,
     recoil: 0,
     accuracy: 100,
     magSize: 999,
@@ -706,6 +707,7 @@ const WEAPON_DEFS = [
     rpm: 430,
     damage: 25,
     spreadDeg: 2.1,
+    spreadMultiplier: 1.0,
     recoil: 0.75,
     accuracy: 74,
     magSize: 20,
@@ -725,6 +727,7 @@ const WEAPON_DEFS = [
     rpm: 360,
     damage: 30,
     spreadDeg: 1.6,
+    spreadMultiplier: 1.0,
     recoil: 0.68,
     accuracy: 83,
     magSize: 12,
@@ -744,6 +747,7 @@ const WEAPON_DEFS = [
     rpm: 230,
     damage: 55,
     spreadDeg: 1.2,
+    spreadMultiplier: 1.1,
     recoil: 1.35,
     accuracy: 79,
     magSize: 7,
@@ -1185,14 +1189,16 @@ class Game {
     this.targets.length = 0;
     this.bots.length = 0;
 
-    const groundBaseColor = v3(0.1, 0.12, 0.16);
-    const groundCenterColor = v3(0.14, 0.2, 0.3);
-    const groundNorthColor = v3(0.24, 0.19, 0.14);
-    const groundSouthColor = v3(0.14, 0.22, 0.15);
-    const perimeterWallColor = v3(0.16, 0.23, 0.34);
-    const structureWallColor = v3(0.31, 0.27, 0.21);
-    const coverColor = v3(0.19, 0.34, 0.25);
-    const buildingColor = v3(0.64, 0.37, 0.23);
+    // 增强颜色对比度，提高视觉层次感
+    const groundBaseColor = v3(0.08, 0.10, 0.14);  // 深色基础地面
+    const groundCenterColor = v3(0.12, 0.18, 0.28);  // 中间通道（冷色调）
+    const groundNorthColor = v3(0.22, 0.17, 0.12);  // 北区（暖色调）
+    const groundSouthColor = v3(0.12, 0.20, 0.13);  // 南区（绿色调）
+    const perimeterWallColor = v3(0.14, 0.20, 0.32);  // 周边墙（蓝色调）
+    const structureWallColor = v3(0.28, 0.24, 0.19);  // 结构墙（浅棕色）
+    const coverColor = v3(0.17, 0.32, 0.23);  // 掩体（深绿色）
+    const buildingColor = v3(0.58, 0.35, 0.22);  // 建筑（橙棕色）
+    const buildingHighlightColor = v3(0.68, 0.42, 0.28);  // 建筑高光面
 
     this.boxes.push(makeBox(v3(0, -0.5, 0), v3(56, 1, 56), groundBaseColor, true));
     this.boxes.push(makeBox(v3(0, 0.02, 0), v3(22, 0.04, 56), groundCenterColor, false));
@@ -1203,8 +1209,13 @@ class Game {
     this.boxes.push(makeBox(v3(-28, 2, 0), v3(1, 6, 56), perimeterWallColor, true));
     this.boxes.push(makeBox(v3(28, 2, 0), v3(1, 6, 56), perimeterWallColor, true));
 
+    // 主要建筑物（增强光照效果）
     this.boxes.push(makeBox(v3(-20, 1.6, -10), v3(5.0, 3.2, 18), buildingColor, true));
     this.boxes.push(makeBox(v3(20, 1.6, 10), v3(5.0, 3.2, 18), buildingColor, true));
+
+    // 建筑物高光面（模拟受光面）
+    this.boxes.push(makeBox(v3(-17.4, 1.6, -10), v3(0.1, 3.0, 16), buildingHighlightColor, false));
+    this.boxes.push(makeBox(v3(17.4, 1.6, 10), v3(0.1, 3.0, 16), buildingHighlightColor, false));
 
     this.boxes.push(makeBox(v3(-4, 1.5, -20), v3(8, 3, 2.2), structureWallColor, true));
     this.boxes.push(makeBox(v3(8, 1.5, -20), v3(6, 3, 2.2), structureWallColor, true));
@@ -2234,6 +2245,16 @@ void main() {
     color *= 1.0 + pattern * 0.04;
   }
 
+  // 雾效（基于距离的线性雾）
+  vec3 fogColor = vec3(0.72, 0.78, 0.88);
+  float fogDensity = 0.015;
+  float dist = length(vWorldPos - uViewPos);
+  float fogFactor = 1.0 - exp(-fogDensity * dist);
+  fogFactor = clamp(fogFactor, 0.0, 0.6);  // 限制雾的最大强度
+
+  // 混合雾效
+  color = mix(color, fogColor, fogFactor);
+
   fragColor = vec4(color, 1.0);
 }
 `;
@@ -2420,14 +2441,19 @@ function updateHud() {
     hitmarkerEl.classList.remove('head');
   }
 
+  // 准星大小基于散布计算
+  const spread = w ? game.calculateSpread() : 0;
   const speed = Math.hypot(game.vel.x, game.vel.z);
   const moving = clamp01(speed / 6);
   const firing = clamp01(w ? w.kick : 0);
   const crouch = clamp01(game.crouchT);
   const air = game.onGround ? 0 : 1;
   const land = clamp01(game.landKick);
-  const gap = 9 + moving * 22 + firing * 10 - crouch * 6 + air * 16 + land * 14;
-  const len = 8 + moving * 4;
+  
+  // 准星扩散 = 基础大小 + 散布影响 + 后坐力影响 + 跳跃影响
+  const spreadGap = spread * 4; // 散布对准星的影响
+  const gap = 9 + spreadGap + moving * 12 + firing * 10 - crouch * 6 + air * 16 + land * 14;
+  const len = 8 + moving * 4 + spreadGap * 0.5;
   const host = crosshairEl || hud;
   host.style.setProperty('--ch-gap', `${gap.toFixed(1)}px`);
   host.style.setProperty('--ch-len', `${len.toFixed(1)}px`);
@@ -2438,24 +2464,30 @@ function updateHud() {
   const r = game.round;
   const showObj = game.mode === 'ai';
   objectiveEl.classList.toggle('hidden', !showObj);
+  
+  // 添加散布信息到 HUD
+  const movementState = game.getMovementState();
+  const spreadValue = w ? game.calculateSpread() : 0;
+  const spreadInfo = w ? `  散布: ${spreadValue.toFixed(2)}° (${movementState})` : '';
+  
   if (showObj) {
     const siteLabel = r.activeSite || 'A/B';
     const plantedLabel = r.plantSite || siteLabel;
     if (r.state === 'freeze') {
       objectiveText.textContent = `Freeze ${r.freezeLeft.toFixed(1)}s  $${game.econ.money}`;
-      objectiveTimer.textContent = `Buy: B打开菜单 / 1-0购买枪械 / Q闪 W烟 E甲`;
+      objectiveTimer.textContent = `Buy: B打开菜单 / 1-0购买枪械 / Q闪 W烟 E甲${spreadInfo}`;
       objectiveFill.style.width = `${clamp01(r.freezeLeft / Math.max(0.1, r.freezeTotal)) * 100}%`;
     } else if (r.state === 'post') {
       objectiveText.textContent = `${(r.winner || '').toUpperCase()} win - ${r.reason}`;
-      objectiveTimer.textContent = `Next round ${r.postLeft.toFixed(1)}s`;
+      objectiveTimer.textContent = `Next round ${r.postLeft.toFixed(1)}s${spreadInfo}`;
       objectiveFill.style.width = `${clamp01(r.postLeft / Math.max(0.1, r.postTotal)) * 100}%`;
     } else if (!r.bombPlanted) {
       objectiveText.textContent = game.team === 't' ? `Plant at ${siteLabel} (E hold)` : `Defend site ${siteLabel}`;
-      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}  FLSH ${game.flashbang.charges}`;
+      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}  FLSH ${game.flashbang.charges}${spreadInfo}`;
       objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
     } else {
       objectiveText.textContent = game.team === 'ct' ? `Defuse ${plantedLabel} (E hold)` : `Bomb planted ${plantedLabel}`;
-      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s  $${game.econ.money}`;
+      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s  $${game.econ.money}${spreadInfo}`;
       objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
     }
   }
@@ -3031,8 +3063,8 @@ function updateWeapon(dt) {
   game.yaw += (Math.random() - 0.5) * recoil * 0.007;
   w.kick = Math.min(1, w.kick + 0.35);
 
-  const isMoving = Math.abs(game.vel.x) > 0.0001 || Math.abs(game.vel.z) > 0.0001;
-  const spreadDeg = isMoving ? w.def.spreadDeg * 2.5 : w.def.spreadDeg;
+  // 使用新的散布系统
+  const spreadDeg = game.calculateSpread();
   const spread = (spreadDeg * Math.PI) / 180;
   const sx = (Math.random() - 0.5) * spread;
   const sy = (Math.random() - 0.5) * spread;
@@ -3707,9 +3739,21 @@ function drawWorld() {
   gl.clearColor(lerp(skyA.x, skyB.x, 0.7), lerp(skyA.y, skyB.y, 0.7), lerp(skyA.z, skyB.z, 0.7), 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.useProgram(program);
+
+  // 启用雾效（通过多边形偏移实现简单的距离雾）
+  // 注意：WebGL2 没有固定管线的雾效，这里通过清除颜色模拟
+  const fogColor = v3(0.72, 0.78, 0.88);  // 雾的颜色
+  const fogDensity = 0.015;  // 雾的密度
+
   gl.uniformMatrix4fv(uProj, false, proj);
   gl.uniformMatrix4fv(uView, false, view);
   gl.uniform3f(uLightDir, -0.35, -1.0, 0.25);
+
+  // 设置新的光照相关 uniform
+  gl.uniformMatrix4fv(uLightSpaceMatrix, false, lightSpaceMatrix);
+  gl.uniform3f(uViewPos, camPos.x, camPos.y, camPos.z);
+  gl.uniform1i(uShadowMap, 0); // 纹理单元 0
+
   gl.bindVertexArray(glsys.vao);
 
   function drawBox(pos, scale, color) {
