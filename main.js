@@ -1366,7 +1366,7 @@ function renderBuyMenu() {
         if (active) classes.push('buy-item--active');
         if (locked) classes.push('buy-item--locked');
         rows.push(
-          `<div class="${classes.join(' ')}"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${def.magSize}发 · 伤害${def.damage} · 射速${def.rpm}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
+          `<div class="${classes.join(' ')}" data-item-key="${item.keyCode}" onclick="tryBuyShopItem(SHOP_ITEM_BY_KEY.get('${item.keyCode}'))" onmouseenter="this.classList.add('buy-item--hover')" onmouseleave="this.classList.remove('buy-item--hover')"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${def.magSize}发 · 伤害${def.damage} · 射速${def.rpm}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
         );
       } else {
         const def = EQUIPMENT_DEFS[item.id];
@@ -1391,7 +1391,7 @@ function renderBuyMenu() {
         if (owned) classes.push('buy-item--owned');
         if (locked) classes.push('buy-item--locked');
         rows.push(
-          `<div class="${classes.join(' ')}"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${extra}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
+          `<div class="${classes.join(' ')}" data-item-key="${item.keyCode}" onclick="tryBuyShopItem(SHOP_ITEM_BY_KEY.get('${item.keyCode}'))" onmouseenter="this.classList.add('buy-item--hover')" onmouseleave="this.classList.remove('buy-item--hover')"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${extra}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
         );
       }
     }

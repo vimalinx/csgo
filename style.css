@@ -496,6 +496,12 @@ body {
   background: rgba(99, 255, 159, 0.08);
 }
 
+.buy-item--hover {
+  background: rgba(109, 230, 255, 0.16);
+  border-color: rgba(109, 230, 255, 0.6);
+  cursor: pointer;
+}
+
 .buy-item--active {
   border-color: rgba(109, 230, 255, 0.5);
 }
