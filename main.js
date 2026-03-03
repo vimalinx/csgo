@@ -2487,7 +2487,27 @@ const uLightDir = gl.getUniformLocation(program, 'uLightDir');
 const uLightSpaceMatrix = gl.getUniformLocation(program, 'uLightSpaceMatrix');
 const uViewPos = gl.getUniformLocation(program, 'uViewPos');
 const uShadowMap = gl.getUniformLocation(program, 'uShadowMap');
-if (!uProj || !uView || !uModel || !uColor || !uLightDir || !uLightSpaceMatrix || !uViewPos || !uShadowMap) throw new Error('Uniforms missing');
+
+// 详细的 uniforms 检查
+const missingUniforms = [];
+if (!uProj) missingUniforms.push('uProj');
+if (!uView) missingUniforms.push('uView');
+if (!uModel) missingUniforms.push('uModel');
+if (!uColor) missingUniforms.push('uColor');
+if (!uLightDir) missingUniforms.push('uLightDir');
+if (!uLightSpaceMatrix) missingUniforms.push('uLightSpaceMatrix');
+if (!uViewPos) missingUniforms.push('uViewPos');
+if (!uShadowMap) missingUniforms.push('uShadowMap');
+
+if (missingUniforms.length > 0) {
+  console.error('=== 着色器 Uniforms 错误 ===');
+  console.error('缺失的 uniforms:', missingUniforms);
+  console.error('着色器程序链接状态:', gl.getProgramParameter(program, gl.LINK_STATUS));
+  console.error('着色器程序信息:', gl.getProgramInfoLog(program));
+  console.error('顶点着色器长度:', VS.length);
+  console.error('片段着色器长度:', FS.length);
+  throw new Error(`Uniforms missing: ${missingUniforms.join(', ')}. Check console for details.`);
+}
 
 const cube = buildCubeMesh();
 const cylinder = buildCylinderMesh(18);
