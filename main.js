@@ -2245,7 +2245,10 @@ document.addEventListener('mousedown', (e) => {
   }
   if (e.button === 2) {
     e.preventDefault();
-    game.isAiming = true;
+    const w = game.getWeapon();
+    if (w && w.def.category === 'sniper') {
+      game.isAiming = true;
+    }
   }
 });
 
