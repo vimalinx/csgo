@@ -1191,8 +1191,10 @@ class Minimap {
 
     for (const bot of this.game.bots) {
       if (!bot.alive) continue;
-      if (bot.team === this.game.team) continue;
-      this.drawDot(bot.pos, '#ff4d4f', 3, bounds);
+      // 队友显示为绿色，敌人显示为红色
+      const isTeammate = bot.team === this.game.team;
+      const color = isTeammate ? '#4ade80' : '#ff4d4f';
+      this.drawDot(bot.pos, color, 3, bounds);
     }
 
     if (this.game.playerAlive) {
@@ -2205,10 +2207,10 @@ document.addEventListener('keydown', (e) => {
     else game.switchWeaponBySlot('secondary');
   }
   if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
-  if (e.code === 'KeyQ' && game.pointerLocked) game.cycleWeapon(1);
+  // Q键切换武器（不再用于闪光弹）
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'KeyG') deploySmokeWall();
-  if (e.code === 'KeyF') deployFlashbang();
+  if (e.code === 'KeyF' && game.pointerLocked) deployFlashbang();
   if (e.code === 'KeyB') toggleBuyMenu();
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
