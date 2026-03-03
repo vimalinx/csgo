@@ -2244,10 +2244,17 @@ document.addEventListener('mousedown', (e) => {
     return;
   }
   if (e.button === 2) {
-    e.preventDefault();
     const w = game.getWeapon();
-    if (w && w.def.category === 'sniper') {
+    if (!w) return;
+    if (w.def.category === 'sniper') {
+      e.preventDefault();
       game.isAiming = true;
+      return;
+    }
+    if (w.def.category === 'pistol') {
+      e.preventDefault();
+      w.silencerOn = !w.silencerOn;
+      setStatus(`Silencer: ${w.silencerOn ? 'ON' : 'OFF'}`, false);
     }
   }
 });
