@@ -2561,7 +2561,7 @@ glsys.cylIndexCount = cylinder.indices.length;
 
 gl.enable(gl.DEPTH_TEST);
 gl.enable(gl.CULL_FACE);
-gl.cullFace(gl.BACK);
+gl.cullFace(gl.FRONT);  // 修复：方块网格使用顺时针顶点顺序，需剔除正面
 
 // ========== 阴影映射系统 ==========
 const SHADOW_WIDTH = 2048;
