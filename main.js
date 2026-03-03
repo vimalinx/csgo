@@ -1166,7 +1166,13 @@ class Minimap {
 
 const game = new Game();
 const minimap = new Minimap(hud, game);
+ensureMinimapActive();
 resetPlayerLoadout();
+
+function ensureMinimapActive() {
+  minimap.setVisible(true);
+  if (hud) hud.classList.add('hud--with-minimap');
+}
 
 showScreen('lobby');
 setOverlayVisible(true);
@@ -1323,13 +1329,12 @@ function toggleBuyMenu() {
 
 function renderBuyMenu() {
   if (!buyMenuBodyEl || !buyMenuEl) return;
-  if (!game.buyMenuOpen) {
-    buyMenuEl.classList.add('hidden');
-    return;
-  }
+  buyMenuEl.classList.toggle('hidden', !game.buyMenuOpen);
+  buyMenuEl.setAttribute('aria-hidden', game.buyMenuOpen ? 'false' : 'true');
 
   const grouped = new Map(SHOP_CATEGORIES.map((cat) => [cat.id, []]));
-  for (const item of SHOP_ITEMS) {
+  const items = Array.isArray(SHOP_ITEMS) ? SHOP_ITEMS : [];
+  for (const item of items) {
     let catId = 'gear';
     if (item.type === 'weapon') {
       const w = WEAPON_DEF_BY_ID.get(item.id);
@@ -1789,6 +1794,9 @@ function startAIMode() {
   setMatchMode('bomb');
 
   game.mode = 'ai';
+  showScreen('ai');
+  setOverlayVisible(false);
+  ensureMinimapActive();
   game.playerAlive = true;
   closeBuyMenu();
   resetPlayerLoadout();
@@ -3349,13 +3357,17 @@ function frame() {
   let dt = (t - last) / 1000;
   last = t;
   dt = Math.min(0.033, Math.max(0, dt));
+  const aiRunning = game.mode === 'ai' && game.uiScreen === 'ai' && !game.ending;
 
   updateSmoke(dt);
 
   if (game.pointerLocked) {
     updatePlayer(dt);
-    updateTargets(dt);
     updateWeapon(dt);
+  }
+
+  if (game.pointerLocked || aiRunning) {
+    updateTargets(dt);
     updateBots(dt);
     updateShells(dt);
     updateTracers(dt);
@@ -3363,7 +3375,7 @@ function frame() {
     updateBombMode(dt);
   }
 
-  if (t - game.lastStatusAt > 2500 && game.pointerLocked) {
+  if (t - game.lastStatusAt > 2500 && (game.pointerLocked || aiRunning)) {
     statusEl.textContent = `Pos ${game.pos.x.toFixed(1)}, ${game.pos.z.toFixed(1)}`;
   }
 
@@ -3375,4 +3387,5 @@ function frame() {
 
 setOverlayVisible(true);
 setStatus('Lobby', false);
+renderBuyMenu();
 requestAnimationFrame(frame);
