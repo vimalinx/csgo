@@ -132,7 +132,16 @@
             
             try {
                 multiplayer = new MultiplayerClient(serverUrl)
-                await multiplayer.connect()
+                
+                // 设置超时
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('连接超时（10秒）')), 10000)
+                })
+                
+                await Promise.race([
+                    multiplayer.connect(),
+                    timeoutPromise
+                ])
                 
                 addLog(log, '✅ 连接成功！', 'success')
                 addLog(log, 'Player ID: ' + multiplayer.playerId, 'info')

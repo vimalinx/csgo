@@ -20,7 +20,11 @@ class MultiplayerClient {
     return new Promise((resolve, reject) => {
       try {
         this.socket = io(this.serverUrl, {
-          transports: ['websocket', 'polling']
+          transports: ['polling', 'websocket'],  // 改用 polling 优先
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 10000  // 10秒超时
         })
 
         this.socket.on('connect', () => {
