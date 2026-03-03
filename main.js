@@ -552,6 +552,66 @@ function buildCubeMesh() {
   };
 }
 
+function buildCylinderMesh(segments = 18) {
+  const seg = Math.max(6, segments | 0);
+  const v = [];
+  const i = [];
+
+  function addVertex(px, py, pz, nx, ny, nz) {
+    const index = v.length / 6;
+    v.push(px, py, pz, nx, ny, nz);
+    return index;
+  }
+
+  const topY = 0.5;
+  const bottomY = -0.5;
+
+  for (let s = 0; s <= seg; s++) {
+    const t = (s / seg) * Math.PI * 2;
+    const x = Math.cos(t);
+    const z = Math.sin(t);
+    addVertex(x, topY, z, x, 0, z);
+    addVertex(x, bottomY, z, x, 0, z);
+  }
+
+  for (let s = 0; s < seg; s++) {
+    const a = s * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    i.push(a, c, b, c, d, b);
+  }
+
+  const topCenter = addVertex(0, topY, 0, 0, 1, 0);
+  const topStart = v.length / 6;
+  for (let s = 0; s < seg; s++) {
+    const t = (s / seg) * Math.PI * 2;
+    addVertex(Math.cos(t), topY, Math.sin(t), 0, 1, 0);
+  }
+  for (let s = 0; s < seg; s++) {
+    const cur = topStart + s;
+    const nxt = topStart + ((s + 1) % seg);
+    i.push(topCenter, cur, nxt);
+  }
+
+  const bottomCenter = addVertex(0, bottomY, 0, 0, -1, 0);
+  const bottomStart = v.length / 6;
+  for (let s = 0; s < seg; s++) {
+    const t = (s / seg) * Math.PI * 2;
+    addVertex(Math.cos(t), bottomY, Math.sin(t), 0, -1, 0);
+  }
+  for (let s = 0; s < seg; s++) {
+    const cur = bottomStart + s;
+    const nxt = bottomStart + ((s + 1) % seg);
+    i.push(bottomCenter, nxt, cur);
+  }
+
+  return {
+    vertices: new Float32Array(v),
+    indices: new Uint16Array(i),
+  };
+}
+
 function makeBox(pos, scale, color, solid) {
   const half = v3(scale.x * 0.5, scale.y * 0.5, scale.z * 0.5);
   return { pos, scale, color, solid, aabb: aabbFromCenter(pos, half) };
@@ -893,6 +953,9 @@ class Game {
     this.firePressed = false;
     this.isAiming = false;
     this.fireModeAuto = true; // 玩家可切换的开火模式
+    /** @type {'flash' | 'smoke' | 'none'} */
+    this.currentEquip = 'none';
+    this.currentEquip = 'none';
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.weaponIndex = 0;
@@ -999,7 +1062,16 @@ class Game {
     return this.weapons[this.weaponIndex];
   }
 
+  /**
+   * @param {'flash' | 'smoke' | 'none'} type
+   */
+  switchEquip(type) {
+    if (type !== 'flash' && type !== 'smoke' && type !== 'none') return;
+    this.currentEquip = type;
+  }
+
   switchWeapon(i) {
+    this.currentEquip = 'none';
     if (this.weapons.length <= 0) return;
     this.weaponIndex = clamp(i, 0, this.weapons.length - 1);
     const w = this.getWeapon();
@@ -1022,6 +1094,14 @@ class Game {
     let next = (this.weaponIndex + step) % len;
     if (next < 0) next += len;
     this.switchWeapon(next);
+  }
+
+  switchEquip(equipId) {
+    if (equipId !== 'flash' && equipId !== 'smoke' && equipId !== 'none') return;
+    this.currentEquip = equipId;
+    // 切换投掷物时清空射击输入，避免误开火
+    this.mouseDown = false;
+    this.firePressed = false;
   }
 
   buildMap() {
@@ -1286,6 +1366,12 @@ function describeWeaponStats(def) {
   return `伤害 ${def.damage} · 射速 ${def.rpm} · 后坐 ${def.recoil.toFixed(2)} · 精准 ${def.accuracy}% · ${fireMode}`;
 }
 
+function getEquipLabel(type) {
+  if (type === 'flash') return '闪光弹';
+  if (type === 'smoke') return '烟雾弹';
+  return '';
+}
+
 function updateWeaponHUD(w) {
   if (!w) return;
   let name = w.def.name;
@@ -1357,6 +1443,7 @@ function giveWeaponToPlayer(weaponId) {
 function resetPlayerLoadout() {
   game.weapons.length = 0;
   game.weaponIndex = 0;
+  game.switchEquip('none');
   syncWeaponSlots();
   const sidearmId = game.team === 'ct' ? 'usp' : 'glock';
   giveWeaponToPlayer(sidearmId);
@@ -2040,7 +2127,9 @@ function updateHud() {
   if (fireModeHintEl) {
     const mode = game.fireModeAuto ? 'AUTO' : 'SEMI';
     const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
-    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}`;
+    const equipLabel = getEquipLabel(game.currentEquip);
+    const equipText = equipLabel ? ` · [投掷] ${equipLabel}` : '';
+    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}${equipText}`;
   }
 
   if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
@@ -2219,10 +2308,13 @@ document.addEventListener('keydown', (e) => {
     else game.switchWeaponBySlot('secondary');
   }
   if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
-  // Q键切换武器（不再用于闪光弹）
+  if (e.code === 'Digit3') {
+    game.switchEquip(game.currentEquip === 'flash' ? 'none' : 'flash');
+  }
+  if (e.code === 'Digit4') {
+    game.switchEquip(game.currentEquip === 'smoke' ? 'none' : 'smoke');
+  }
   if (e.code === 'KeyR') tryReload();
-  if (e.code === 'KeyG') deploySmokeWall();
-  if (e.code === 'KeyF' && game.pointerLocked) deployFlashbang();
   if (e.code === 'KeyB') toggleBuyMenu();
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
@@ -2263,6 +2355,18 @@ document.addEventListener('keyup', (e) => {
 document.addEventListener('mousedown', (e) => {
   if (!game.pointerLocked) return;
   if (e.button === 0) {
+    if (game.currentEquip === 'flash') {
+      game.mouseDown = false;
+      game.firePressed = false;
+      deployFlashbang();
+      return;
+    }
+    if (game.currentEquip === 'smoke') {
+      game.mouseDown = false;
+      game.firePressed = false;
+      deploySmokeWall();
+      return;
+    }
     game.mouseDown = true;
     game.firePressed = true;
     return;
@@ -2900,7 +3004,19 @@ function updatePlayer(dt) {
 
   const crouching = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
   const sprint = game.keys.has('AltLeft') || game.keys.has('AltRight');
-  const baseSpeed = sprint ? 6.8 : 4.8;
+  const w = game.getWeapon();
+  const speed = w && w.def.speed ? w.def.speed : 6.0;
+  const holdingThrowable =
+    !!w &&
+    !!w.def &&
+    (w.def.category === 'throwable' ||
+      w.def.category === 'grenade' ||
+      w.def.slot === 'grenade' ||
+      w.def.slot === 'utility' ||
+      w.def.id === 'flash' ||
+      w.def.id === 'smoke');
+  let baseSpeed = speed * (sprint ? 6.8 / 6.0 : 4.8 / 6.0);
+  if (holdingThrowable) baseSpeed *= 0.9;
   const maxSpeed = crouching ? baseSpeed * 0.55 : baseSpeed;
   const accel = game.onGround ? 45 : 18;
   const friction = game.onGround ? 14 : 1;
