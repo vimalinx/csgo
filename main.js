@@ -807,7 +807,129 @@ class Game {
   }
 }
 
+class Minimap {
+  constructor(host, gameState) {
+    this.game = gameState;
+    this.host = host;
+    this.size = 200;
+    this.pad = 12;
+    this.visible = false;
+
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = this.size;
+    this.canvas.height = this.size;
+    this.canvas.className = 'minimap';
+    this.canvas.setAttribute('aria-hidden', 'true');
+    this.ctx = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+    if (!this.ctx) {
+      throw new Error('Minimap 2D canvas unavailable');
+    }
+
+    host.appendChild(this.canvas);
+    this.setVisible(true);
+  }
+
+  setVisible(visible) {
+    this.visible = !!visible;
+    this.host.classList.toggle('hud--with-minimap', this.visible);
+    this.canvas.classList.toggle('hidden', !this.visible);
+  }
+
+  toggle() {
+    this.setVisible(!this.visible);
+    return this.visible;
+  }
+
+  worldToMap(x, z, bounds) {
+    const inner = this.size - this.pad * 2;
+    const nx = clamp01((x + bounds) / (bounds * 2));
+    const nz = clamp01((z + bounds) / (bounds * 2));
+    return {
+      x: this.pad + nx * inner,
+      y: this.pad + (1 - nz) * inner,
+    };
+  }
+
+  drawObstacle(bounds, box) {
+    const halfX = box.scale.x * 0.5;
+    const halfZ = box.scale.z * 0.5;
+
+    const tl = this.worldToMap(box.pos.x - halfX, box.pos.z + halfZ, bounds);
+    const br = this.worldToMap(box.pos.x + halfX, box.pos.z - halfZ, bounds);
+    const w = br.x - tl.x;
+    const h = br.y - tl.y;
+
+    if (w <= 0.25 || h <= 0.25) return;
+    this.ctx.fillRect(tl.x, tl.y, w, h);
+    this.ctx.strokeRect(tl.x, tl.y, w, h);
+  }
+
+  drawDot(pos, color, radius, bounds) {
+    const p = this.worldToMap(pos.x, pos.z, bounds);
+    this.ctx.beginPath();
+    this.ctx.fillStyle = color;
+    this.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
+  render() {
+    if (!this.visible) return;
+    const ctx = this.ctx;
+    const bounds = Math.max(1, this.game.mapBounds + 0.5);
+    const inner = this.size - this.pad * 2;
+
+    ctx.clearRect(0, 0, this.size, this.size);
+
+    ctx.fillStyle = 'rgba(6, 10, 16, 0.78)';
+    ctx.fillRect(0, 0, this.size, this.size);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, this.size - 1, this.size - 1);
+
+    const topLeft = this.worldToMap(-bounds, bounds, bounds);
+    ctx.strokeStyle = 'rgba(156, 186, 226, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(topLeft.x, topLeft.y, inner, inner);
+
+    ctx.fillStyle = 'rgba(170, 188, 214, 0.16)';
+    ctx.strokeStyle = 'rgba(190, 207, 228, 0.34)';
+    for (const box of this.game.boxes) {
+      if (!box.solid) continue;
+      if (box.scale.x > 50 && box.scale.z > 50) continue;
+      this.drawObstacle(bounds, box);
+    }
+
+    if (this.game.mode !== 'ai') {
+      ctx.fillStyle = 'rgba(221, 231, 244, 0.72)';
+      ctx.font = '12px monospace';
+      ctx.fillText('MINIMAP', 16, this.size - 16);
+      return;
+    }
+
+    for (const bot of this.game.bots) {
+      if (!bot.alive) continue;
+      if (bot.team === this.game.team) continue;
+      this.drawDot(bot.pos, '#ff4d4f', 3, bounds);
+    }
+
+    if (this.game.playerAlive) {
+      this.drawDot(this.game.pos, '#4f9cff', 4, bounds);
+      const p = this.worldToMap(this.game.pos.x, this.game.pos.z, bounds);
+      const f = forwardFromYawPitch(this.game.yaw, 0);
+      const look = this.worldToMap(this.game.pos.x + f.x * 2.4, this.game.pos.z + f.z * 2.4, bounds);
+      ctx.strokeStyle = 'rgba(79, 156, 255, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(look.x, look.y);
+      ctx.stroke();
+    }
+  }
+}
+
 const game = new Game();
+const minimap = new Minimap(hud, game);
 
 showScreen('lobby');
 setOverlayVisible(true);
@@ -1395,6 +1517,13 @@ document.addEventListener('pointerlockerror', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'F5') {
+    e.preventDefault();
+    const shown = minimap.toggle();
+    setStatus(`Minimap ${shown ? 'shown' : 'hidden'}`, false);
+    return;
+  }
+
   if (game.pointerLocked) {
     if (
       e.code === 'KeyW' ||
@@ -2692,6 +2821,7 @@ function frame() {
 
   updateHud();
   drawWorld();
+  minimap.render();
   requestAnimationFrame(frame);
 }
 
