@@ -615,6 +615,8 @@ function makeBot(id, pos) {
   };
 }
 
+const DEFAULT_SPEED = 6.0;
+
 const WEAPON_DEFS = [
   {
     id: 'glock',
@@ -632,6 +634,7 @@ const WEAPON_DEFS = [
     magSize: 20,
     reserveMax: 120,
     reloadSec: 1.6,
+    speed: 6.5,
     tip: '高射速近距手枪',
   },
   {
@@ -650,6 +653,7 @@ const WEAPON_DEFS = [
     magSize: 12,
     reserveMax: 48,
     reloadSec: 1.7,
+    speed: 6.5,
     tip: '稳定精准点射',
   },
   {
@@ -668,6 +672,7 @@ const WEAPON_DEFS = [
     magSize: 7,
     reserveMax: 35,
     reloadSec: 2.2,
+    speed: 6.5,
     tip: '高伤害重手枪',
   },
   {
@@ -686,6 +691,7 @@ const WEAPON_DEFS = [
     magSize: 30,
     reserveMax: 90,
     reloadSec: 2.5,
+    speed: 5.0,
     tip: '高威力全自动步枪',
   },
   {
@@ -704,6 +710,7 @@ const WEAPON_DEFS = [
     magSize: 25,
     reserveMax: 75,
     reloadSec: 2.3,
+    speed: 5.0,
     tip: '稳定可控中远距离',
   },
   {
@@ -722,6 +729,7 @@ const WEAPON_DEFS = [
     magSize: 25,
     reserveMax: 75,
     reloadSec: 2.1,
+    speed: 5.0,
     tip: '经济型全自动步枪',
   },
   {
@@ -740,6 +748,7 @@ const WEAPON_DEFS = [
     magSize: 30,
     reserveMax: 120,
     reloadSec: 2.0,
+    speed: 5.5,
     tip: '高机动冲锋枪',
   },
   {
@@ -758,6 +767,7 @@ const WEAPON_DEFS = [
     magSize: 50,
     reserveMax: 100,
     reloadSec: 2.9,
+    speed: 5.5,
     tip: '超高射速大弹匣',
   },
   {
@@ -776,6 +786,7 @@ const WEAPON_DEFS = [
     magSize: 10,
     reserveMax: 30,
     reloadSec: 3.0,
+    speed: 4.5,
     tip: '高伤害狙击步枪',
   },
   {
@@ -794,6 +805,7 @@ const WEAPON_DEFS = [
     magSize: 10,
     reserveMax: 60,
     reloadSec: 2.8,
+    speed: 4.5,
     tip: '轻型高机动狙击枪',
   },
 ];
