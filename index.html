@@ -142,6 +142,7 @@
     <div id="hud" class="hud" aria-hidden="true">
       <div class="hud__top">
         <div id="status" class="status"></div>
+        <div id="moneyText" class="money mono">$800</div>
         <div id="aliveCounter" class="alive-counter mono" aria-hidden="true">
           <span class="alive-counter__team alive-counter__team--ct">CT <span id="ctAlive">0</span></span>
           <span class="alive-counter__sep">:</span>
@@ -155,6 +156,16 @@
           <div class="objective__track"><div id="objectiveFill" class="objective__fill"></div></div>
         </div>
       </div>
+
+      <div id="buyMenu" class="buy-menu hidden" aria-hidden="true">
+        <div class="buy-menu__header">
+          <div class="buy-menu__title">购买菜单</div>
+          <div class="buy-menu__hint mono">冻结期可购买 · 按 ESC 关闭</div>
+        </div>
+        <div id="buyMenuBody" class="buy-menu__body"></div>
+        <div id="buyNotice" class="buy-menu__notice mono"></div>
+      </div>
+
       <div class="hud__bottom">
         <div class="hud__left">
           <div class="bar">
@@ -185,7 +196,7 @@
         </div>
         <div class="hud__right">
           <div id="weaponName" class="weapon">Pistol</div>
-          <div id="fireModeHint" class="fire-mode-hint mono">[B] AUTO</div>
+          <div id="fireModeHint" class="fire-mode-hint mono">[B] 购买菜单</div>
           <div class="ammo"><span id="ammoText">12 / 36</span></div>
           <div id="reloadWrap" class="reload" aria-hidden="true">
             <div class="reload__track"><div id="reloadBar" class="reload__fill"></div></div>

@@ -66,6 +66,10 @@ const objectiveEl = document.getElementById('objective');
 const objectiveText = document.getElementById('objectiveText');
 const objectiveTimer = document.getElementById('objectiveTimer');
 const objectiveFill = document.getElementById('objectiveFill');
+const moneyTextEl = document.getElementById('moneyText');
+const buyMenuEl = document.getElementById('buyMenu');
+const buyMenuBodyEl = document.getElementById('buyMenuBody');
+const buyNoticeEl = document.getElementById('buyNotice');
 
 canvas.tabIndex = 0;
 
@@ -387,9 +391,15 @@ class AudioBus {
     if (kind === 0) {
       this.blip(240, 0.06, 0);
       this.blip(160, 0.08, 2);
-    } else {
+    } else if (kind === 1) {
       this.blip(320, 0.04, 1);
       this.blip(200, 0.06, 2);
+    } else if (kind === 2) {
+      this.blip(360, 0.032, 1);
+      this.blip(260, 0.05, 2);
+    } else {
+      this.blip(180, 0.08, 0);
+      this.blip(120, 0.12, 2);
     }
   }
 
@@ -578,32 +588,240 @@ function makeBot(id, pos) {
   };
 }
 
-const WEAPONS = [
+const WEAPON_DEFS = [
   {
-    name: 'Pistol',
+    id: 'glock',
+    name: 'Glock',
+    category: 'pistol',
+    slot: 'secondary',
     kind: 0,
-    rpm: 300,
-    damage: 34,
-    spreadDeg: 1.4,
-    recoil: 0.9,
-    magSize: 30,
-    reserveMax: 90,
-    reloadSec: 1.25,
-    tip: '精准点射',
+    auto: false,
+    price: 200,
+    rpm: 430,
+    damage: 25,
+    spreadDeg: 2.1,
+    recoil: 0.75,
+    accuracy: 74,
+    magSize: 20,
+    reserveMax: 120,
+    reloadSec: 1.6,
+    tip: '高射速近距手枪',
   },
   {
-    name: 'Rifle',
+    id: 'usp',
+    name: 'USP-S',
+    category: 'pistol',
+    slot: 'secondary',
+    kind: 0,
+    auto: false,
+    price: 200,
+    rpm: 360,
+    damage: 30,
+    spreadDeg: 1.6,
+    recoil: 0.68,
+    accuracy: 83,
+    magSize: 12,
+    reserveMax: 48,
+    reloadSec: 1.7,
+    tip: '稳定精准点射',
+  },
+  {
+    id: 'deagle',
+    name: 'Desert Eagle',
+    category: 'pistol',
+    slot: 'secondary',
+    kind: 0,
+    auto: false,
+    price: 700,
+    rpm: 230,
+    damage: 55,
+    spreadDeg: 1.2,
+    recoil: 1.35,
+    accuracy: 79,
+    magSize: 7,
+    reserveMax: 35,
+    reloadSec: 2.2,
+    tip: '高伤害重手枪',
+  },
+  {
+    id: 'ak47',
+    name: 'AK-47',
+    category: 'rifle',
+    slot: 'primary',
     kind: 1,
+    auto: true,
+    price: 2700,
     rpm: 600,
-    damage: 18,
-    spreadDeg: 2.2,
-    recoil: 0.6,
+    damage: 36,
+    spreadDeg: 2.6,
+    recoil: 1.05,
+    accuracy: 72,
     magSize: 30,
     reserveMax: 90,
-    reloadSec: 1.7,
-    tip: '全自动压枪',
+    reloadSec: 2.5,
+    tip: '高威力全自动步枪',
+  },
+  {
+    id: 'm4a1s',
+    name: 'M4A1-S',
+    category: 'rifle',
+    slot: 'primary',
+    kind: 1,
+    auto: true,
+    price: 2900,
+    rpm: 640,
+    damage: 32,
+    spreadDeg: 2.2,
+    recoil: 0.92,
+    accuracy: 78,
+    magSize: 25,
+    reserveMax: 75,
+    reloadSec: 2.3,
+    tip: '稳定可控中远距离',
+  },
+  {
+    id: 'famas',
+    name: 'FAMAS',
+    category: 'rifle',
+    slot: 'primary',
+    kind: 1,
+    auto: true,
+    price: 2050,
+    rpm: 670,
+    damage: 30,
+    spreadDeg: 2.4,
+    recoil: 0.96,
+    accuracy: 75,
+    magSize: 25,
+    reserveMax: 75,
+    reloadSec: 2.1,
+    tip: '经济型全自动步枪',
+  },
+  {
+    id: 'mp5',
+    name: 'MP5',
+    category: 'smg',
+    slot: 'primary',
+    kind: 2,
+    auto: true,
+    price: 1500,
+    rpm: 760,
+    damage: 26,
+    spreadDeg: 2.8,
+    recoil: 0.88,
+    accuracy: 68,
+    magSize: 30,
+    reserveMax: 120,
+    reloadSec: 2.0,
+    tip: '高机动冲锋枪',
+  },
+  {
+    id: 'p90',
+    name: 'P90',
+    category: 'smg',
+    slot: 'primary',
+    kind: 2,
+    auto: true,
+    price: 2350,
+    rpm: 880,
+    damage: 22,
+    spreadDeg: 3.4,
+    recoil: 0.82,
+    accuracy: 63,
+    magSize: 50,
+    reserveMax: 100,
+    reloadSec: 2.9,
+    tip: '超高射速大弹匣',
+  },
+  {
+    id: 'awp',
+    name: 'AWP',
+    category: 'sniper',
+    slot: 'primary',
+    kind: 3,
+    auto: false,
+    price: 4750,
+    rpm: 52,
+    damage: 115,
+    spreadDeg: 0.28,
+    recoil: 1.6,
+    accuracy: 96,
+    magSize: 10,
+    reserveMax: 30,
+    reloadSec: 3.0,
+    tip: '高伤害狙击步枪',
+  },
+  {
+    id: 'scout',
+    name: 'Scout',
+    category: 'sniper',
+    slot: 'primary',
+    kind: 3,
+    auto: false,
+    price: 1700,
+    rpm: 78,
+    damage: 75,
+    spreadDeg: 0.42,
+    recoil: 1.2,
+    accuracy: 90,
+    magSize: 10,
+    reserveMax: 60,
+    reloadSec: 2.8,
+    tip: '轻型高机动狙击枪',
   },
 ];
+
+const WEAPON_DEF_BY_ID = new Map(WEAPON_DEFS.map((def) => [def.id, def]));
+
+const EQUIPMENT_DEFS = {
+  flash: {
+    id: 'flash',
+    name: '闪光弹',
+    category: 'gear',
+    price: 200,
+    desc: '致盲干扰',
+  },
+  smoke: {
+    id: 'smoke',
+    name: '烟雾弹',
+    category: 'gear',
+    price: 300,
+    desc: '烟雾遮挡',
+  },
+  armor: {
+    id: 'armor',
+    name: '防弹衣',
+    category: 'gear',
+    price: 650,
+    desc: '护甲提升',
+  },
+};
+
+const SHOP_CATEGORIES = [
+  { id: 'pistol', label: '手枪' },
+  { id: 'rifle', label: '步枪' },
+  { id: 'smg', label: '冲锋枪' },
+  { id: 'sniper', label: '狙击枪' },
+  { id: 'gear', label: '装备' },
+];
+
+const SHOP_ITEMS = [
+  { keyCode: 'Digit1', keyLabel: '1', type: 'weapon', id: 'glock' },
+  { keyCode: 'Digit2', keyLabel: '2', type: 'weapon', id: 'usp' },
+  { keyCode: 'Digit3', keyLabel: '3', type: 'weapon', id: 'deagle' },
+  { keyCode: 'Digit4', keyLabel: '4', type: 'weapon', id: 'ak47' },
+  { keyCode: 'Digit5', keyLabel: '5', type: 'weapon', id: 'm4a1s' },
+  { keyCode: 'Digit6', keyLabel: '6', type: 'weapon', id: 'famas' },
+  { keyCode: 'Digit7', keyLabel: '7', type: 'weapon', id: 'mp5' },
+  { keyCode: 'Digit8', keyLabel: '8', type: 'weapon', id: 'p90' },
+  { keyCode: 'Digit9', keyLabel: '9', type: 'weapon', id: 'awp' },
+  { keyCode: 'Digit0', keyLabel: '0', type: 'weapon', id: 'scout' },
+  { keyCode: 'KeyQ', keyLabel: 'Q', type: 'equip', id: 'flash' },
+  { keyCode: 'KeyW', keyLabel: 'W', type: 'equip', id: 'smoke' },
+  { keyCode: 'KeyE', keyLabel: 'E', type: 'equip', id: 'armor' },
+];
+
+const SHOP_ITEM_BY_KEY = new Map(SHOP_ITEMS.map((item) => [item.keyCode, item]));
 
 class WeaponState {
   constructor(def) {
@@ -636,7 +854,8 @@ class Game {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.weaponIndex = 0;
-    this.weapons = [new WeaponState(WEAPONS[0]), new WeaponState(WEAPONS[1])];
+    this.weapons = [];
+    this.weaponSlots = { primary: '', secondary: '' };
     this.boxes = [];
     this.colliders = [];
     this.targets = [];
@@ -644,7 +863,9 @@ class Game {
     this.shells = [];
     this.tracers = [];
     this.hitmarker = { t: 0, head: false };
-    this.autoFire = true;
+    this.buyMenuOpen = false;
+    this.buyNotice = '';
+    this.buyNoticeUrgent = false;
     this.crosshairGap = 9;
     this.crouchT = 0;
     this.landKick = 0;
@@ -661,14 +882,10 @@ class Game {
     this.econ = {
       money: 800,
       maxMoney: 16000,
+      initialMoney: 800,
       rewardKill: 300,
       rewardWin: 3250,
       rewardLose: 1900,
-      buy: {
-        armor: 650,
-        rifle: 2700,
-        smoke: 300,
-      },
     };
     this.mapBounds = 27.5;
     this.spawnZones = {
@@ -693,6 +910,12 @@ class Game {
         { id: 'AEntry', pos: v3(12, 0.9, -14), scale: v3(3.0, 1.8, 3.4) },
         { id: 'BEntry', pos: v3(12, 0.9, 14), scale: v3(3.0, 1.8, 3.4) },
       ],
+    };
+    this.flashbang = {
+      cooldown: 0,
+      cooldownTotal: 14,
+      charges: 0,
+      maxCharges: 2,
     };
     this.round = {
       state: 'idle',
@@ -728,14 +951,27 @@ class Game {
   }
 
   getWeapon() {
+    if (this.weapons.length === 0) return null;
+    this.weaponIndex = clamp(this.weaponIndex, 0, this.weapons.length - 1);
     return this.weapons[this.weaponIndex];
   }
 
   switchWeapon(i) {
+    if (this.weapons.length <= 0) return;
     this.weaponIndex = clamp(i, 0, this.weapons.length - 1);
     const w = this.getWeapon();
+    if (!w) return;
     weaponNameEl.textContent = w.def.name;
-    tipText.textContent = w.def.tip;
+    tipText.textContent = describeWeaponStats(w.def);
+  }
+
+  switchWeaponBySlot(slot) {
+    for (let i = 0; i < this.weapons.length; i++) {
+      if (this.weapons[i].def.slot === slot) {
+        this.switchWeapon(i);
+        return;
+      }
+    }
   }
 
   buildMap() {
@@ -930,6 +1166,7 @@ class Minimap {
 
 const game = new Game();
 const minimap = new Minimap(hud, game);
+resetPlayerLoadout();
 
 showScreen('lobby');
 setOverlayVisible(true);
@@ -959,6 +1196,281 @@ function showResult(title, detail) {
 function setOverlayVisible(visible) {
   overlay.classList.toggle('hidden', !visible);
   hud.style.display = visible ? 'none' : 'grid';
+}
+
+function describeWeaponStats(def) {
+  const fireMode = def.auto ? 'AUTO' : 'SEMI';
+  return `伤害 ${def.damage} · 射速 ${def.rpm} · 后坐 ${def.recoil.toFixed(2)} · 精准 ${def.accuracy}% · ${fireMode}`;
+}
+
+function getWeaponStateById(id) {
+  for (const ws of game.weapons) {
+    if (ws.def.id === id) return ws;
+  }
+  return null;
+}
+
+function syncWeaponSlots() {
+  game.weaponSlots.primary = '';
+  game.weaponSlots.secondary = '';
+  for (const ws of game.weapons) {
+    if (ws.def.slot === 'primary') game.weaponSlots.primary = ws.def.id;
+    if (ws.def.slot === 'secondary') game.weaponSlots.secondary = ws.def.id;
+  }
+}
+
+function refillWeaponState(ws) {
+  ws.mag = ws.def.magSize;
+  ws.reserve = ws.def.reserveMax;
+  ws.reloading = false;
+  ws.reloadLeft = 0;
+  ws.reloadTotal = ws.def.reloadSec;
+  ws.cooldown = 0;
+  ws.kick = 0;
+  ws.shot = 0;
+  ws.flash = 0;
+}
+
+function giveWeaponToPlayer(weaponId) {
+  const def = WEAPON_DEF_BY_ID.get(weaponId);
+  if (!def) return null;
+
+  const existed = getWeaponStateById(weaponId);
+  if (existed) {
+    refillWeaponState(existed);
+    return existed;
+  }
+
+  const slot = def.slot;
+  let removedIndex = -1;
+  for (let i = 0; i < game.weapons.length; i++) {
+    if (game.weapons[i].def.slot === slot) {
+      removedIndex = i;
+      break;
+    }
+  }
+  if (removedIndex >= 0) {
+    game.weapons.splice(removedIndex, 1);
+    if (game.weaponIndex > removedIndex) game.weaponIndex -= 1;
+    if (game.weaponIndex === removedIndex) game.weaponIndex = 0;
+  }
+
+  const ws = new WeaponState(def);
+  game.weapons.push(ws);
+  syncWeaponSlots();
+  return ws;
+}
+
+function resetPlayerLoadout() {
+  game.weapons.length = 0;
+  game.weaponIndex = 0;
+  syncWeaponSlots();
+  const sidearmId = game.team === 'ct' ? 'usp' : 'glock';
+  giveWeaponToPlayer(sidearmId);
+  syncWeaponSlots();
+  game.switchWeaponBySlot('secondary');
+}
+
+function refillPlayerLoadoutAmmo() {
+  for (const ws of game.weapons) {
+    refillWeaponState(ws);
+  }
+}
+
+function isBuyAllowed() {
+  return game.mode === 'ai' && game.round.state === 'freeze' && game.playerAlive;
+}
+
+function setBuyNotice(text, urgent) {
+  game.buyNotice = text || '';
+  game.buyNoticeUrgent = !!urgent;
+  if (!buyNoticeEl) return;
+  buyNoticeEl.textContent = game.buyNotice;
+  buyNoticeEl.classList.remove('ok', 'fail');
+  if (game.buyNotice) buyNoticeEl.classList.add(urgent ? 'fail' : 'ok');
+}
+
+function closeBuyMenu() {
+  game.buyMenuOpen = false;
+  if (buyMenuEl) {
+    buyMenuEl.classList.add('hidden');
+    buyMenuEl.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function openBuyMenu(autoMessage) {
+  if (!buyMenuEl) return;
+  if (!isBuyAllowed()) {
+    if (game.mode === 'ai' && game.round.state !== 'freeze') {
+      setStatus('仅冻结期可购买', true);
+    }
+    return;
+  }
+  game.buyMenuOpen = true;
+  buyMenuEl.classList.remove('hidden');
+  buyMenuEl.setAttribute('aria-hidden', 'false');
+  if (autoMessage) setBuyNotice('回合开始，按数字键/字母键购买', false);
+  renderBuyMenu();
+}
+
+function toggleBuyMenu() {
+  if (game.buyMenuOpen) {
+    closeBuyMenu();
+    return;
+  }
+  openBuyMenu(false);
+}
+
+function renderBuyMenu() {
+  if (!buyMenuBodyEl || !buyMenuEl) return;
+  if (!game.buyMenuOpen) {
+    buyMenuEl.classList.add('hidden');
+    return;
+  }
+
+  const grouped = new Map(SHOP_CATEGORIES.map((cat) => [cat.id, []]));
+  for (const item of SHOP_ITEMS) {
+    let catId = 'gear';
+    if (item.type === 'weapon') {
+      const w = WEAPON_DEF_BY_ID.get(item.id);
+      if (!w) continue;
+      catId = w.category;
+    }
+    const list = grouped.get(catId);
+    if (list) list.push(item);
+  }
+
+  const activeWeapon = game.getWeapon();
+  const canBuyNow = isBuyAllowed();
+  const blocks = [];
+
+  for (const cat of SHOP_CATEGORIES) {
+    const items = grouped.get(cat.id) || [];
+    const rows = [];
+    for (const item of items) {
+      if (item.type === 'weapon') {
+        const def = WEAPON_DEF_BY_ID.get(item.id);
+        if (!def) continue;
+        const owned = getWeaponStateById(def.id);
+        const active = !!activeWeapon && activeWeapon.def.id === def.id;
+        const cannotAfford = game.econ.money < def.price;
+        const locked = !canBuyNow || cannotAfford;
+        const classes = ['buy-item'];
+        if (owned) classes.push('buy-item--owned');
+        if (active) classes.push('buy-item--active');
+        if (locked) classes.push('buy-item--locked');
+        rows.push(
+          `<div class="${classes.join(' ')}"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${def.magSize}发 · 伤害${def.damage} · 射速${def.rpm}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
+        );
+      } else {
+        const def = EQUIPMENT_DEFS[item.id];
+        if (!def) continue;
+        const cannotAfford = game.econ.money < def.price;
+        let extra = def.desc;
+        let owned = false;
+        if (def.id === 'armor') {
+          owned = game.armor >= 100;
+          extra = `护甲 ${Math.floor(game.armor)}/100`;
+        }
+        if (def.id === 'flash') {
+          owned = game.flashbang.charges >= game.flashbang.maxCharges;
+          extra = `库存 ${game.flashbang.charges}/${game.flashbang.maxCharges}`;
+        }
+        if (def.id === 'smoke') {
+          owned = game.smoke.charges >= game.smoke.maxCharges;
+          extra = `库存 ${game.smoke.charges}/${game.smoke.maxCharges}`;
+        }
+        const locked = !canBuyNow || cannotAfford || owned;
+        const classes = ['buy-item'];
+        if (owned) classes.push('buy-item--owned');
+        if (locked) classes.push('buy-item--locked');
+        rows.push(
+          `<div class="${classes.join(' ')}"><div class="buy-item__top"><span class="buy-item__name">${def.name}</span><span class="buy-item__price">$${def.price}</span></div><div class="buy-item__meta">${extra}</div><span class="buy-item__key">[${item.keyLabel}]</span></div>`
+        );
+      }
+    }
+    blocks.push(`<div class="buy-col"><div class="buy-col__title">${cat.label}</div>${rows.join('')}</div>`);
+  }
+
+  buyMenuBodyEl.innerHTML = blocks.join('');
+  setBuyNotice(game.buyNotice, game.buyNoticeUrgent);
+}
+
+function tryBuyShopItem(item) {
+  if (!item) return false;
+  if (!isBuyAllowed()) {
+    const reason = !game.playerAlive ? '死亡状态无法购买' : '仅冻结期可购买';
+    setStatus(reason, true);
+    setBuyNotice(reason, true);
+    renderBuyMenu();
+    return true;
+  }
+
+  if (item.type === 'weapon') {
+    const def = WEAPON_DEF_BY_ID.get(item.id);
+    if (!def) return true;
+    const existed = getWeaponStateById(def.id);
+    if (existed && existed.mag >= existed.def.magSize && existed.reserve >= existed.def.reserveMax) {
+      const msg = `${def.name} 弹药已满`;
+      setStatus(msg, true);
+      setBuyNotice(msg, true);
+      renderBuyMenu();
+      return true;
+    }
+    if (!spendMoney(def.price)) {
+      const msg = `资金不足：${def.name} 需要 $${def.price}`;
+      setStatus(msg, true);
+      setBuyNotice(msg, true);
+      renderBuyMenu();
+      return true;
+    }
+    giveWeaponToPlayer(def.id);
+    syncWeaponSlots();
+    game.switchWeaponBySlot(def.slot);
+    const ok = `购买成功：${def.name} ($${def.price})`;
+    setStatus(ok, false);
+    setBuyNotice(ok, false);
+    renderBuyMenu();
+    return true;
+  }
+
+  const def = EQUIPMENT_DEFS[item.id];
+  if (!def) return true;
+  if (item.id === 'armor' && game.armor >= 100) {
+    setStatus('防弹衣已满', true);
+    setBuyNotice('防弹衣已满', true);
+    renderBuyMenu();
+    return true;
+  }
+  if (item.id === 'flash' && game.flashbang.charges >= game.flashbang.maxCharges) {
+    setStatus('闪光弹库存已满', true);
+    setBuyNotice('闪光弹库存已满', true);
+    renderBuyMenu();
+    return true;
+  }
+  if (item.id === 'smoke' && game.smoke.charges >= game.smoke.maxCharges) {
+    setStatus('烟雾弹库存已满', true);
+    setBuyNotice('烟雾弹库存已满', true);
+    renderBuyMenu();
+    return true;
+  }
+  if (!spendMoney(def.price)) {
+    const msg = `资金不足：${def.name} 需要 $${def.price}`;
+    setStatus(msg, true);
+    setBuyNotice(msg, true);
+    renderBuyMenu();
+    return true;
+  }
+
+  if (item.id === 'armor') game.armor = 100;
+  if (item.id === 'flash') game.flashbang.charges += 1;
+  if (item.id === 'smoke') game.smoke.charges += 1;
+
+  const ok = `购买成功：${def.name} ($${def.price})`;
+  setStatus(ok, false);
+  setBuyNotice(ok, false);
+  renderBuyMenu();
+  return true;
 }
 
 function applyDifficultyToBots() {
@@ -1005,11 +1517,13 @@ function isRoundFrozen() {
 
 function addMoney(amount) {
   game.econ.money = clamp(Math.floor(game.econ.money + amount), 0, game.econ.maxMoney);
+  renderBuyMenu();
 }
 
 function spendMoney(cost) {
   if (game.econ.money < cost) return false;
   game.econ.money -= cost;
+  renderBuyMenu();
   return true;
 }
 
@@ -1030,6 +1544,7 @@ function roundAward(winnerTeam) {
 function resetRoundEntities() {
   respawnPlayer();
   game.playerAlive = true;
+  refillPlayerLoadoutAmmo();
   for (const b of game.bots) {
     const spawn = randomSpawnFromTeam(b.team);
     b.spawn = v3(spawn.x, spawn.y, spawn.z);
@@ -1070,13 +1585,15 @@ function prepareNewBombRound() {
   }
   game.smoke.active = [];
   game.smoke.cooldown = 0;
-  game.smoke.charges = 1;
+  game.flashbang.cooldown = 0;
   rebuildGameplayColliders();
   resetRoundEntities();
+  openBuyMenu(true);
 }
 
 function endBombRound(winnerTeam, reason) {
   if (game.round.state === 'post') return;
+  closeBuyMenu();
   game.round.winner = winnerTeam;
   game.round.reason = reason;
   game.round.state = 'post';
@@ -1085,56 +1602,6 @@ function endBombRound(winnerTeam, reason) {
   else game.score.t += 1;
   roundAward(winnerTeam);
   setStatus(`${winnerTeam.toUpperCase()} win: ${reason}`, false);
-}
-
-function tryBuy(item) {
-  if (game.round.state !== 'freeze') {
-    setStatus('Buy only during freeze', true);
-    return;
-  }
-  if (!game.playerAlive) {
-    setStatus('Cannot buy while dead', true);
-    return;
-  }
-  if (item === 'armor') {
-    if (game.armor >= 100) {
-      setStatus('Armor full', true);
-      return;
-    }
-    if (!spendMoney(game.econ.buy.armor)) {
-      setStatus('Not enough money', true);
-      return;
-    }
-    game.armor = 100;
-    setStatus(`Bought armor ($${game.econ.buy.armor})`, false);
-    return;
-  }
-  if (item === 'rifle') {
-    if (!spendMoney(game.econ.buy.rifle)) {
-      setStatus('Not enough money', true);
-      return;
-    }
-    game.weaponIndex = 1;
-    const w = game.getWeapon();
-    w.mag = w.def.magSize;
-    w.reserve = w.def.reserveMax;
-    weaponNameEl.textContent = w.def.name;
-    tipText.textContent = w.def.tip;
-    setStatus(`Bought rifle ($${game.econ.buy.rifle})`, false);
-    return;
-  }
-  if (item === 'smoke') {
-    if (game.smoke.charges >= game.smoke.maxCharges) {
-      setStatus('Smoke full', true);
-      return;
-    }
-    if (!spendMoney(game.econ.buy.smoke)) {
-      setStatus('Not enough money', true);
-      return;
-    }
-    game.smoke.charges += 1;
-    setStatus(`Bought smoke ($${game.econ.buy.smoke})`, false);
-  }
 }
 
 function getSiteByKey(key) {
@@ -1211,7 +1678,54 @@ function deploySmokeWall() {
   setStatus(`Smoke deployed: ${best.id}`, false);
 }
 
+function deployFlashbang() {
+  if (game.mode !== 'ai') {
+    setStatus('Flash available in AI mode only', true);
+    return;
+  }
+  if (!game.playerAlive) {
+    setStatus('Cannot use flash while dead', true);
+    return;
+  }
+  if (game.flashbang.cooldown > 0) {
+    setStatus(`Flash cooldown ${game.flashbang.cooldown.toFixed(1)}s`, true);
+    return;
+  }
+  if (game.flashbang.charges <= 0) {
+    setStatus('No flash charge', true);
+    return;
+  }
+
+  game.flashbang.cooldown = game.flashbang.cooldownTotal;
+  game.flashbang.charges = Math.max(0, game.flashbang.charges - 1);
+
+  const origin = v3(game.pos.x, game.pos.y + 1.5, game.pos.z);
+  const fwd = v3norm(forwardFromYawPitch(game.yaw, 0));
+  const burst = v3add(origin, v3scale(fwd, 5.5));
+  let affected = 0;
+  const tNow = nowMs();
+
+  for (const b of game.bots) {
+    if (!b.alive || b.team === game.team) continue;
+    const eye = v3(b.pos.x, b.pos.y + 1.4, b.pos.z);
+    const diff = v3sub(eye, burst);
+    const dist = v3len(diff);
+    if (dist <= 0.001 || dist > 14) continue;
+    const dir = v3scale(diff, 1 / dist);
+    if (rayBlockedBySmoke(burst, dir, dist)) continue;
+    b.nextThinkAt = Math.max(b.nextThinkAt, tNow + 1100);
+    b.shootCooldown = Math.max(b.shootCooldown, 1.3);
+    affected += 1;
+  }
+
+  setStatus(`Flash popped (${affected})`, false);
+  renderBuyMenu();
+}
+
 function updateSmoke(dt) {
+  if (game.flashbang.cooldown > 0) {
+    game.flashbang.cooldown = Math.max(0, game.flashbang.cooldown - dt);
+  }
   if (game.smoke.cooldown > 0) {
     game.smoke.cooldown = Math.max(0, game.smoke.cooldown - dt);
   }
@@ -1276,6 +1790,8 @@ function startAIMode() {
 
   game.mode = 'ai';
   game.playerAlive = true;
+  closeBuyMenu();
+  resetPlayerLoadout();
   respawnPlayer();
   game.vel = v3(0, 0, 0);
   game.crouchT = 0;
@@ -1303,29 +1819,21 @@ function startAIMode() {
   game.round.roundLeft = game.round.roundTotal;
   game.smoke.active = [];
   game.smoke.cooldown = 0;
-  game.smoke.charges = 1;
+  game.smoke.charges = 0;
+  game.flashbang.cooldown = 0;
+  game.flashbang.charges = 0;
   rebuildGameplayColliders();
   rebuildBots(game.botCount);
-  game.econ.money = 800;
+  game.econ.money = game.econ.initialMoney;
 
   prepareNewBombRound();
-
-  for (const ws of game.weapons) {
-    ws.mag = ws.def.magSize;
-    ws.reserve = ws.def.reserveMax;
-    ws.reloading = false;
-    ws.reloadLeft = 0;
-    ws.cooldown = 0;
-    ws.kick = 0;
-    ws.shot = 0;
-    ws.flash = 0;
-  }
 
   lockPointer();
 }
 
 function returnToLobby() {
   game.mode = 'lobby';
+  closeBuyMenu();
   unlockPointer();
   setOverlayVisible(true);
   showScreen('lobby');
@@ -1397,7 +1905,7 @@ gl.enable(gl.CULL_FACE);
 gl.cullFace(gl.BACK);
 
 game.buildMap();
-game.switchWeapon(0);
+game.switchWeaponBySlot('secondary');
 
 const proj = mat4Identity();
 const view = mat4Identity();
@@ -1419,15 +1927,18 @@ function updateHud() {
   hpBar.style.width = `${clamp01(game.hp / 100) * 100}%`;
   arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
   const w = game.getWeapon();
-  ammoText.textContent = `${w.mag} / ${w.reserve}`;
+  if (moneyTextEl) moneyTextEl.textContent = `$${Math.floor(game.econ.money)}`;
+  ammoText.textContent = w ? `${w.mag} / ${w.reserve}` : '-- / --';
   if (fireModeHintEl) {
-    fireModeHintEl.textContent = `[B] ${game.autoFire ? 'AUTO' : 'SEMI'}`;
+    const mode = w && w.def.auto ? 'AUTO' : 'SEMI';
+    const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
+    fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · ${mode}`;
   }
 
   if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
   if (tAliveEl) tAliveEl.textContent = String(teamAliveCount('t'));
 
-  const isReloading = w.reloading;
+  const isReloading = !!w && w.reloading;
   reloadWrap.classList.toggle('show', isReloading);
   if (isReloading) {
     const p = clamp01(1 - w.reloadLeft / Math.max(0.0001, w.reloadTotal));
@@ -1445,7 +1956,7 @@ function updateHud() {
 
   const speed = Math.hypot(game.vel.x, game.vel.z);
   const moving = clamp01(speed / 6);
-  const firing = clamp01(w.kick);
+  const firing = clamp01(w ? w.kick : 0);
   const crouch = clamp01(game.crouchT);
   const air = game.onGround ? 0 : 1;
   const land = clamp01(game.landKick);
@@ -1463,7 +1974,7 @@ function updateHud() {
     const plantedLabel = r.plantSite || siteLabel;
     if (r.state === 'freeze') {
       objectiveText.textContent = `Freeze ${r.freezeLeft.toFixed(1)}s  $${game.econ.money}`;
-      objectiveTimer.textContent = `Buy: U armor / I rifle / O smoke`;
+      objectiveTimer.textContent = `Buy: B打开菜单 / 1-0购买枪械 / Q闪 W烟 E甲`;
       objectiveFill.style.width = `${clamp01(r.freezeLeft / Math.max(0.1, r.freezeTotal)) * 100}%`;
     } else if (r.state === 'post') {
       objectiveText.textContent = `${(r.winner || '').toUpperCase()} win - ${r.reason}`;
@@ -1471,7 +1982,7 @@ function updateHud() {
       objectiveFill.style.width = `${clamp01(r.postLeft / Math.max(0.1, r.postTotal)) * 100}%`;
     } else if (!r.bombPlanted) {
       objectiveText.textContent = game.team === 't' ? `Plant at ${siteLabel} (E hold)` : `Defend site ${siteLabel}`;
-      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}`;
+      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}  FLSH ${game.flashbang.charges}`;
       objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
     } else {
       objectiveText.textContent = game.team === 'ct' ? `Defuse ${plantedLabel} (E hold)` : `Bomb planted ${plantedLabel}`;
@@ -1479,6 +1990,8 @@ function updateHud() {
       objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
     }
   }
+
+  renderBuyMenu();
 }
 
 function lockPointer() {
@@ -1498,6 +2011,7 @@ document.addEventListener('pointerlockchange', () => {
   game.pointerLocked = document.pointerLockElement === canvas;
   setOverlayVisible(!game.pointerLocked);
   if (!game.pointerLocked && game.mode === 'ai') {
+    closeBuyMenu();
     if (!game.ending && game.uiScreen !== 'result') {
       showScreen('pause');
       setStatus('Paused', false);
@@ -1505,6 +2019,7 @@ document.addEventListener('pointerlockchange', () => {
   }
   if (game.pointerLocked) {
     setStatus('In game', false);
+    if (isBuyAllowed()) openBuyMenu(true);
   }
   game.keys.clear();
   game.mouseDown = false;
@@ -1536,26 +2051,58 @@ document.addEventListener('keydown', (e) => {
       e.code === 'AltLeft' ||
       e.code === 'AltRight' ||
       e.code === 'KeyE' ||
+      e.code === 'KeyF' ||
+      e.code === 'KeyQ' ||
+      e.code === 'Digit3' ||
+      e.code === 'Digit4' ||
+      e.code === 'Digit5' ||
+      e.code === 'Digit6' ||
+      e.code === 'Digit7' ||
+      e.code === 'Digit8' ||
+      e.code === 'Digit9' ||
+      e.code === 'Digit0' ||
       e.code === 'KeyR' ||
       e.code === 'KeyG' ||
+      e.code === 'KeyB' ||
       e.code === 'Digit1' ||
       e.code === 'Digit2'
     ) {
       e.preventDefault();
     }
   }
+
+  if (game.pointerLocked && e.code === 'Escape' && game.buyMenuOpen) {
+    closeBuyMenu();
+    setStatus('购买菜单已关闭', false);
+    e.preventDefault();
+    return;
+  }
+
+  if (game.pointerLocked && game.buyMenuOpen) {
+    if (e.code === 'KeyB') {
+      closeBuyMenu();
+      setStatus('购买菜单已关闭', false);
+      e.preventDefault();
+      return;
+    }
+    const buyItem = SHOP_ITEM_BY_KEY.get(e.code);
+    if (buyItem) {
+      tryBuyShopItem(buyItem);
+      e.preventDefault();
+      return;
+    }
+  }
+
   game.keys.add(e.code);
-  if (e.code === 'Digit1') game.switchWeapon(0);
-  if (e.code === 'Digit2') game.switchWeapon(1);
+  if (e.code === 'Digit1') {
+    if (game.weaponSlots.primary) game.switchWeaponBySlot('primary');
+    else game.switchWeaponBySlot('secondary');
+  }
+  if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'KeyG') deploySmokeWall();
-  if (e.code === 'KeyU') tryBuy('armor');
-  if (e.code === 'KeyI') tryBuy('rifle');
-  if (e.code === 'KeyO') tryBuy('smoke');
-  if (e.code === 'KeyB') {
-    game.autoFire = !game.autoFire;
-    setStatus(`Firing toggled (${game.autoFire ? 'AUTO' : 'SEMI'})`, false);
-  }
+  if (e.code === 'KeyF') deployFlashbang();
+  if (e.code === 'KeyB') toggleBuyMenu();
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
 
@@ -1828,6 +2375,7 @@ function updateWeapon(dt) {
   if (isRoundFrozen()) return;
 
   const w = game.getWeapon();
+  if (!w) return;
   if (w.cooldown > 0) w.cooldown = Math.max(0, w.cooldown - dt);
   if (w.kick > 0) w.kick = Math.max(0, w.kick - dt * 4.5);
   if (w.shot > 0) w.shot = Math.max(0, w.shot - dt * 14);
@@ -1847,7 +2395,7 @@ function updateWeapon(dt) {
   }
 
   const fireHeld = game.mouseDown && game.pointerLocked;
-  const wantsFire = game.autoFire ? fireHeld || game.firePressed : game.firePressed;
+  const wantsFire = w.def.auto ? fireHeld || game.firePressed : game.firePressed;
   if (!wantsFire) return;
   if (w.cooldown > 0) return;
   if (w.mag <= 0) {
@@ -1865,12 +2413,12 @@ function updateWeapon(dt) {
   w.flash = 1;
 
   const recoilBase = w.def.recoil * (0.6 + Math.random() * 0.5);
-  const recoil = game.autoFire ? recoilBase * 1.25 : recoilBase;
+  const recoil = recoilBase;
   game.pitch += recoil * 0.012;
   game.yaw += (Math.random() - 0.5) * recoil * 0.007;
   w.kick = Math.min(1, w.kick + 0.35);
 
-  const spread = ((game.autoFire ? w.def.spreadDeg * 1.15 : w.def.spreadDeg) * Math.PI) / 180;
+  const spread = (w.def.spreadDeg * Math.PI) / 180;
   const sx = (Math.random() - 0.5) * spread;
   const sy = (Math.random() - 0.5) * spread;
   const fwdCam = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
@@ -1888,8 +2436,8 @@ function updateWeapon(dt) {
   const airAcc = game.onGround ? 1 : 2.2;
   const landAcc = 1 + game.landKick * 1.8;
   const spreadAcc = crouchAcc * moveAcc;
-
-  const finalAcc = spreadAcc * airAcc * landAcc;
+  const weaponAcc = clamp((120 - w.def.accuracy) / 100, 0.24, 1.2);
+  const finalAcc = spreadAcc * airAcc * landAcc * weaponAcc;
   const aimDirAcc = v3norm(forwardFromYawPitch(game.yaw + sx * finalAcc, game.pitch + sy * finalAcc));
   const bobT = nowMs() * 0.001;
   const bobA = 0.02 * clamp01(speed / 6);
