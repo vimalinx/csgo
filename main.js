@@ -1708,7 +1708,7 @@ function rebuildGameplayColliders() {
   for (const s of game.smoke.active) {
     game.colliders.push(s.aabb);
   }
-  refreshNavigationGrid();
+  // refreshNavigationGrid(); // TODO: AI寻路功能，暂时禁用
 }
 
 function isRoundFrozen() {
