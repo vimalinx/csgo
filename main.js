@@ -347,6 +347,22 @@ function nowMs() {
   return performance.now();
 }
 
+const NAV_GRID_SIZE = 56;
+const NAV_GRID_ORIGIN = -28;
+const NAV_CELL_SIZE = 1;
+const NAV_COLLIDER_PADDING = 0.42;
+const NAV_DIAGONAL_COST = Math.SQRT2;
+const NAV_NEIGHBORS = [
+  { x: 1, z: 0, cost: 1 },
+  { x: -1, z: 0, cost: 1 },
+  { x: 0, z: 1, cost: 1 },
+  { x: 0, z: -1, cost: 1 },
+  { x: 1, z: 1, cost: NAV_DIAGONAL_COST },
+  { x: -1, z: 1, cost: NAV_DIAGONAL_COST },
+  { x: 1, z: -1, cost: NAV_DIAGONAL_COST },
+  { x: -1, z: -1, cost: NAV_DIAGONAL_COST },
+];
+
 class AudioBus {
   constructor() {
     this.ctx = null;
@@ -585,6 +601,16 @@ function makeBot(id, pos) {
     patrolPhase: Math.random() * Math.PI * 2,
     patrolNode: 0,
     objectiveSite: id % 2 === 0 ? 'A' : 'B',
+    navPath: [],
+    navIndex: 0,
+    navGoalKey: '',
+    navRepathAt: 0,
+    forceRepath: false,
+    stuckTime: 0,
+    lastNavPos: v3(pos.x, pos.y, pos.z),
+    coverPos: null,
+    coverEvalAt: 0,
+    coverEnemyKey: '',
   };
 }
 
@@ -859,6 +885,7 @@ class Game {
     this.weaponSlots = { primary: '', secondary: '' };
     this.boxes = [];
     this.colliders = [];
+    this.grid = Array.from({ length: NAV_GRID_SIZE }, () => Array(NAV_GRID_SIZE).fill(0));
     this.targets = [];
     this.bots = [];
     this.shells = [];
@@ -1515,6 +1542,7 @@ function rebuildGameplayColliders() {
   for (const s of game.smoke.active) {
     game.colliders.push(s.aabb);
   }
+  refreshNavigationGrid();
 }
 
 function isRoundFrozen() {
@@ -1564,6 +1592,16 @@ function resetRoundEntities() {
     b.weapon.reloading = false;
     b.weapon.reloadLeft = 0;
     b.shootCooldown = 0;
+    b.navPath = [];
+    b.navIndex = 0;
+    b.navGoalKey = '';
+    b.navRepathAt = 0;
+    b.forceRepath = false;
+    b.stuckTime = 0;
+    b.lastNavPos = v3(spawn.x, spawn.y, spawn.z);
+    b.coverPos = null;
+    b.coverEvalAt = 0;
+    b.coverEnemyKey = '';
   }
 }
 
