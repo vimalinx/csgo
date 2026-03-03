@@ -2202,7 +2202,7 @@ async function startOnlineMode() {
     // Try to connect to server
     setStatus('连接服务器中...', false)
     await multiplayer.connect()
-    
+
     // Show login UI
     createLoginUI(multiplayer, (username) => {
       console.log(`玩家 ${username} 登录成功`)
@@ -2219,7 +2219,26 @@ async function startOnlineMode() {
     })
   } catch (error) {
     console.error('连接失败:', error)
-    alert('无法连接到服务器: ' + error.message)
+
+    // 提供更友好的错误提示
+    let errorMessage = error.message
+
+    if (error.message.includes('SSL证书') || error.message.includes('certificate')) {
+      errorMessage = `SSL证书错误。
+
+由于服务器使用自签名证书，您需要先手动信任证书：
+
+1. 在新标签页中打开：https://123.60.21.129
+2. 点击"高级" → "继续访问"
+3. 然后返回此页面重试
+
+或者使用HTTP访问（如果服务器支持）：
+http://vimalinx.github.io/csgo/`
+    } else if (error.message.includes('timeout')) {
+      errorMessage = '连接超时。服务器可能暂时不可用，请稍后重试。'
+    }
+
+    alert('连接失败\n\n' + errorMessage)
     showScreen('lobby')
   }
 }
@@ -2596,7 +2615,7 @@ glsys.cylIndexCount = cylinder.indices.length;
 
 gl.enable(gl.DEPTH_TEST);
 gl.enable(gl.CULL_FACE);
-gl.cullFace(gl.FRONT);  // 修复：方块网格使用顺时针顶点顺序，需剔除正面
+gl.cullFace(gl.BACK);  // 网格使用 CCW 顶点顺序（正面），剔除背面
 
 // ========== 阴影映射系统 ==========
 const SHADOW_WIDTH = 2048;
@@ -4072,20 +4091,60 @@ function updateBots(dt) {
 
     let wish = v3(0, 0, 0);
     if (b.state === 'chase') {
-      wish = v3(dir.x, 0, dir.z);
+      // 追逐模式：使用 A* 寻路追踪目标
+      if (!b.navPath || b.navIndex >= b.navPath.length || !b.navGoal || v3len(v3sub(targetPos, b.navGoal)) > 2) {
+        // 需要重新计算路径
+        b.navGoal = targetPos;
+        b.navPath = findPath(v3(b.pos.x, 0, b.pos.z), v3(targetPos.x, 0, targetPos.z));
+        b.navIndex = 0;
+      }
+
+      if (b.navPath && b.navIndex < b.navPath.length) {
+        const nextPoint = b.navPath[b.navIndex];
+        const toNext = v3sub(nextPoint, v3(b.pos.x, 0, b.pos.z));
+        const distNext = v3len(toNext);
+
+        if (distNext < 1.0) {
+          b.navIndex++; // 到达路径点，移动到下一个
+        } else {
+          wish = v3norm(toNext);
+        }
+      } else {
+        // A* 失败，直接追踪
+        wish = v3(dir.x, 0, dir.z);
+      }
+
       if (dist < 4.2) wish = v3scale(wish, -0.25);
     } else {
-      const nodes = game.routeNodes[b.team] || game.routeNodes.ct;
-      const targetNode = nodes[b.patrolNode % nodes.length];
-      const toNode = v3sub(targetNode, v3(b.pos.x, 0, b.pos.z));
-      const distNode = v3len(toNode);
-      if (distNode < 1.5) {
-        b.patrolNode = (b.patrolNode + 1 + Math.floor(Math.random() * 2)) % nodes.length;
+      // 巡逻模式：使用 A* 寻路到随机点
+      if (!b.navPath || b.navIndex >= b.navPath.length) {
+        // 需要找到新的巡逻目标
+        const target = getRandomPatrolPoint();
+        b.navGoal = target;
+        b.navPath = findPath(v3(b.pos.x, 0, b.pos.z), target);
+        b.navIndex = 0;
       }
-      wish = v3norm(toNode);
-      if (distNode < 0.25) {
-        const phase = (tNow * 0.001 + b.patrolPhase) % (Math.PI * 2);
-        wish = v3(Math.sin(phase), 0, Math.cos(phase));
+
+      if (b.navPath && b.navIndex < b.navPath.length) {
+        const nextPoint = b.navPath[b.navIndex];
+        const toNext = v3sub(nextPoint, v3(b.pos.x, 0, b.pos.z));
+        const distNext = v3len(toNext);
+
+        if (distNext < 1.0) {
+          b.navIndex++; // 到达路径点，移动到下一个
+        } else {
+          wish = v3norm(toNext);
+        }
+      } else {
+        // A* 失败，使用旧的巡逻逻辑作为后备
+        const nodes = game.routeNodes[b.team] || game.routeNodes.ct;
+        const targetNode = nodes[b.patrolNode % nodes.length];
+        const toNode = v3sub(targetNode, v3(b.pos.x, 0, b.pos.z));
+        const distNode = v3len(toNode);
+        if (distNode < 1.5) {
+          b.patrolNode = (b.patrolNode + 1 + Math.floor(Math.random() * 2)) % nodes.length;
+        }
+        wish = v3norm(toNode);
       }
     }
     wish = v3norm(wish);

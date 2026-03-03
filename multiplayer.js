@@ -19,6 +19,11 @@ class MultiplayerClient {
   connect() {
     return new Promise((resolve, reject) => {
       try {
+        console.log('=== 连接详情 ===')
+        console.log('服务器地址:', this.serverUrl)
+        console.log('页面协议:', window.location.protocol)
+        console.log('页面地址:', window.location.href)
+
         this.socket = io(this.serverUrl, {
           transports: ['polling', 'websocket'],  // 改用 polling 优先
           reconnection: true,
@@ -43,9 +48,26 @@ class MultiplayerClient {
         })
 
         this.socket.on('connect_error', (error) => {
-          console.error('连接错误:', error)
+          console.error('=== 连接错误详情 ===')
+          console.error('错误类型:', error.type || 'unknown')
+          console.error('错误信息:', error.message)
+          console.error('错误描述:', error.description || 'none')
+          console.error('服务器地址:', this.serverUrl)
+          console.error('页面协议:', window.location.protocol)
+
+          let errorMsg = '无法连接到服务器: ' + error.message
+
+          // 提供更具体的错误提示
+          if (error.message && error.message.includes('certificate')) {
+            errorMsg = 'SSL证书错误。请在浏览器中访问 https://123.60.21.129 并信任证书后重试。'
+          } else if (error.message && error.message.includes('timeout')) {
+            errorMsg = '连接超时。请检查网络连接或服务器状态。'
+          } else if (window.location.protocol === 'https:' && this.serverUrl.startsWith('http:')) {
+            errorMsg = 'HTTPS页面无法连接HTTP服务器（混合内容限制）。'
+          }
+
           this.isConnected = false
-          reject(new Error('无法连接到服务器: ' + error.message))
+          reject(new Error(errorMsg))
         })
 
         this.socket.on('error', (error) => {
@@ -55,6 +77,7 @@ class MultiplayerClient {
           }
         })
       } catch (error) {
+        console.error('初始化错误:', error)
         reject(error)
       }
     })
