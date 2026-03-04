@@ -3,6 +3,145 @@
  * Connects to the multiplayer server and handles real-time communication
  */
 
+const TEAM_VISUALS = Object.freeze({
+  ct: Object.freeze({
+    key: 'ct',
+    label: 'CT',
+    hex: '#4A90E2',
+    rgb: Object.freeze({ r: 74, g: 144, b: 226 }),
+    v3: Object.freeze({ x: 0.29, y: 0.56, z: 0.89 })
+  }),
+  t: Object.freeze({
+    key: 't',
+    label: 'T',
+    hex: '#E24A4A',
+    rgb: Object.freeze({ r: 226, g: 74, b: 74 }),
+    v3: Object.freeze({ x: 0.89, y: 0.29, z: 0.29 })
+  }),
+  neutral: Object.freeze({
+    key: 'neutral',
+    label: 'N',
+    hex: '#808080',
+    rgb: Object.freeze({ r: 128, g: 128, b: 128 }),
+    v3: Object.freeze({ x: 0.5, y: 0.5, z: 0.5 })
+  })
+})
+
+const WEAPON_ICON_MAP = Object.freeze({
+  rifle: 'RFL',
+  smg: 'SMG',
+  pistol: 'PST',
+  shotgun: 'SGN',
+  sniper: 'SNP',
+  knife: 'KNF',
+  grenade: 'GND',
+  unknown: 'UNK'
+})
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) {
+    return fallback
+  }
+  return Math.max(min, Math.min(max, number))
+}
+
+function safeString(value, fallback, maxLength = 24) {
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim()
+  if (!trimmed) return fallback
+  return trimmed.slice(0, maxLength)
+}
+
+export function normalizeTeam(team) {
+  if (typeof team !== 'string') return 'neutral'
+  const lowered = team.trim().toLowerCase()
+  if (lowered === 'ct' || lowered === 'counter-terrorist' || lowered === 'counterterrorist') {
+    return 'ct'
+  }
+  if (lowered === 't' || lowered === 'terrorist' || lowered === 'terrorists') {
+    return 't'
+  }
+  return 'neutral'
+}
+
+export function normalizeWeaponType(weapon) {
+  if (typeof weapon !== 'string') return 'unknown'
+  const lowered = weapon.trim().toLowerCase()
+  if (!lowered) return 'unknown'
+
+  if (lowered.includes('knife') || lowered.includes('melee')) return 'knife'
+  if (lowered.includes('grenade') || lowered.includes('flash') || lowered.includes('smoke')) return 'grenade'
+  if (lowered.includes('sniper') || lowered.includes('awp')) return 'sniper'
+  if (lowered.includes('shotgun') || lowered.includes('nova')) return 'shotgun'
+  if (
+    lowered.includes('pistol') ||
+    lowered.includes('deagle') ||
+    lowered.includes('glock') ||
+    lowered.includes('usp')
+  ) {
+    return 'pistol'
+  }
+  if (
+    lowered.includes('smg') ||
+    lowered.includes('mp5') ||
+    lowered.includes('ump') ||
+    lowered.includes('p90')
+  ) {
+    return 'smg'
+  }
+  if (
+    lowered.includes('rifle') ||
+    lowered.includes('ak') ||
+    lowered.includes('m4')
+  ) {
+    return 'rifle'
+  }
+
+  return WEAPON_ICON_MAP[lowered] ? lowered : 'unknown'
+}
+
+export function getWeaponIcon(weapon) {
+  return WEAPON_ICON_MAP[normalizeWeaponType(weapon)]
+}
+
+export function getTeamVisual(team) {
+  return TEAM_VISUALS[normalizeTeam(team)] || TEAM_VISUALS.neutral
+}
+
+export function normalizePlayerVisualData(input = {}, fallback = {}) {
+  const fallbackTeam = normalizeTeam(fallback.team)
+  const fallbackMaxHp = clampNumber(fallback.maxHp ?? fallback.maxHealth, 1, 999, 100)
+  const maxHp = clampNumber(input.maxHp ?? input.maxHealth, 1, 999, fallbackMaxHp)
+  const hp = clampNumber(
+    input.hp ?? input.health,
+    0,
+    maxHp,
+    clampNumber(fallback.hp ?? fallback.health, 0, maxHp, maxHp)
+  )
+  const name = safeString(
+    input.name ?? input.username,
+    safeString(fallback.name ?? fallback.username, 'Player', 24),
+    24
+  )
+  const team = normalizeTeam(input.team ?? fallbackTeam)
+  const weapon = normalizeWeaponType(input.weapon ?? input.weaponType ?? fallback.weapon)
+  const alive = typeof input.alive === 'boolean'
+    ? input.alive
+    : (typeof fallback.alive === 'boolean' ? fallback.alive : hp > 0)
+  const healthRatio = maxHp > 0 ? hp / maxHp : 0
+
+  return {
+    team,
+    hp,
+    maxHp,
+    name,
+    weapon,
+    alive,
+    healthRatio
+  }
+}
+
 class MultiplayerClient {
   constructor(serverUrl = 'https://123.60.21.129:443') {
     this.serverUrl = serverUrl
@@ -11,6 +150,16 @@ class MultiplayerClient {
     this.playerId = null
     this.username = null
     this.isConnected = false
+    this.localVisualState = normalizePlayerVisualData({
+      name: 'You',
+      team: 'ct',
+      hp: 100,
+      maxHp: 100,
+      weapon: 'rifle',
+      alive: true
+    })
+    this.remoteVisualStates = new Map()
+    this.internalVisualBridgeBound = false
   }
 
   /**
@@ -31,6 +180,8 @@ class MultiplayerClient {
           reconnectionDelay: 1000,
           timeout: 10000  // 10秒超时
         })
+        this.internalVisualBridgeBound = false
+        this.setupVisualStateBridge()
 
         this.socket.on('connect', () => {
           console.log('✅ 已连接到服务器')
@@ -106,6 +257,7 @@ class MultiplayerClient {
         
         if (data.success) {
           this.username = username
+          this.setLocalVisualState({ name: username })
           resolve(data)
         } else {
           reject(new Error(data.error || '注册失败'))
@@ -222,15 +374,65 @@ class MultiplayerClient {
   }
 
   /**
+   * Update local player visualization state
+   */
+  setLocalVisualState(state = {}) {
+    this.localVisualState = normalizePlayerVisualData({
+      ...this.localVisualState,
+      ...state,
+      name: state.name || state.username || this.username || this.localVisualState.name
+    }, this.localVisualState)
+    return { ...this.localVisualState }
+  }
+
+  /**
+   * Get local player visualization state
+   */
+  getLocalVisualState() {
+    return { ...this.localVisualState }
+  }
+
+  /**
+   * Get remote player visualization state
+   */
+  getRemoteVisualState(playerId) {
+    if (!playerId) return null
+    const value = this.remoteVisualStates.get(playerId)
+    return value ? { ...value } : null
+  }
+
+  /**
+   * Get all remote player visualization states
+   */
+  getRemoteVisualStateMap() {
+    return new Map(this.remoteVisualStates)
+  }
+
+  /**
+   * Subscribe to remote visualization updates
+   */
+  onVisualStateUpdate(callback) {
+    this.onVisualStateUpdateCallback = callback
+  }
+
+  /**
    * Send player movement
    */
-  sendMove(position, rotation, velocity) {
+  sendMove(position, rotation, velocity, state = {}) {
     if (this.roomId && this.socket && this.isConnected) {
+      const visualState = this.setLocalVisualState(state)
       this.socket.emit('move', {
         roomId: this.roomId,
         position: { x: position.x, y: position.y, z: position.z },
         rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
-        velocity: velocity ? { x: velocity.x, y: velocity.y, z: velocity.z } : null
+        velocity: velocity ? { x: velocity.x, y: velocity.y, z: velocity.z } : null,
+        hp: visualState.hp,
+        maxHp: visualState.maxHp,
+        weapon: visualState.weapon,
+        alive: visualState.alive,
+        team: visualState.team,
+        username: visualState.name,
+        name: visualState.name
       })
     }
   }
@@ -238,12 +440,16 @@ class MultiplayerClient {
   /**
    * Send shooting event
    */
-  sendShoot(targetPosition) {
+  sendShoot(targetPlayerId, weaponType = 'unknown', extra = {}) {
     if (this.roomId && this.socket && this.isConnected) {
-      this.socket.emit('shoot', {
+      const payload = {
         roomId: this.roomId,
-        targetPosition
-      })
+        targetId: targetPlayerId || null,
+        weaponType: weaponType || 'unknown',
+        ...extra
+      }
+
+      this.socket.emit('shoot', payload)
     }
   }
 
@@ -266,6 +472,114 @@ class MultiplayerClient {
   onChat(callback) {
     if (this.socket) {
       this.socket.on('chat', callback)
+    }
+  }
+
+  /**
+   * Send hit event (damage dealt to another player)
+   */
+  sendHit(targetPlayerId, damage, weaponType = 'unknown', extra = {}) {
+    if (this.roomId && this.socket && this.isConnected) {
+      // 新协议：统一通过 shoot 事件上报命中信息
+      this.sendShoot(targetPlayerId, weaponType, { damage, ...extra })
+
+      // 旧协议兼容：保留 hit 事件
+      this.socket.emit('hit', {
+        roomId: this.roomId,
+        targetPlayerId,
+        damage
+      })
+    }
+  }
+
+  /**
+   * Set callback for player damage
+   */
+  onPlayerDamaged(callback) {
+    if (this.socket) {
+      this.socket.on('playerDamaged', callback)
+    }
+  }
+
+  /**
+   * Set callback for damage events (new protocol)
+   */
+  onDamage(callback) {
+    if (!this.socket) return
+
+    this.socket.on('damage', callback)
+
+    // 旧协议兼容
+    this.socket.on('playerDamaged', (data) => {
+      callback({
+        ...data,
+        targetId: data.targetId || data.playerId || data.targetPlayerId,
+        hp: typeof data.hp === 'number' ? data.hp : data.health
+      })
+    })
+  }
+
+  /**
+   * Set callback for player death
+   */
+  onPlayerDied(callback) {
+    if (this.socket) {
+      this.socket.on('playerDied', callback)
+    }
+  }
+
+  /**
+   * Set callback for death events (new protocol)
+   */
+  onDeath(callback) {
+    if (!this.socket) return
+
+    this.socket.on('death', callback)
+
+    // 旧协议兼容
+    this.socket.on('playerDied', (data) => {
+      callback({
+        ...data,
+        playerId: data.playerId || data.targetId || data.targetPlayerId
+      })
+    })
+  }
+
+  /**
+   * Set callback for player respawn
+   */
+  onPlayerRespawned(callback) {
+    if (this.socket) {
+      this.socket.on('playerRespawned', callback)
+    }
+  }
+
+  /**
+   * Set callback for respawn events (new protocol)
+   */
+  onRespawn(callback) {
+    if (!this.socket) return
+
+    this.socket.on('respawn', callback)
+
+    // 旧协议兼容
+    this.socket.on('playerRespawned', (data) => {
+      callback({
+        ...data,
+        playerId: data.playerId || data.targetId || data.targetPlayerId
+      })
+    })
+  }
+
+  /**
+   * Request respawn from server
+   */
+  requestRespawn() {
+    if (this.roomId && this.socket && this.isConnected) {
+      const payload = { roomId: this.roomId }
+      this.socket.emit('respawnRequest', payload)
+      // 旧服务器可能监听 respawn 作为请求事件
+      this.socket.emit('respawn', payload)
     }
   }
 
@@ -366,6 +680,16 @@ class MultiplayerClient {
       this.roomId = null
       this.playerId = null
       this.username = null
+      this.remoteVisualStates.clear()
+      this.internalVisualBridgeBound = false
+      this.localVisualState = normalizePlayerVisualData({
+        name: 'You',
+        team: 'ct',
+        hp: 100,
+        maxHp: 100,
+        weapon: 'rifle',
+        alive: true
+      })
     }
   }
 
@@ -381,6 +705,201 @@ class MultiplayerClient {
       t: []
     }
   }
+
+  /**
+   * Get team color based on team type
+   * @param {string} team - Team type ('ct' or 't')
+   * @returns {object} - Color object with hex and rgb properties
+   */
+  getTeamColor(team) {
+    const visual = getTeamVisual(team)
+    return {
+      hex: visual.hex,
+      rgb: { ...visual.rgb },
+      v3: { ...visual.v3 }
+    }
+  }
+
+  /**
+   * Get team color in v3 format (for rendering)
+   * @param {string} team - Team type ('ct' or 't')
+   * @returns {object} - v3 color object {x, y, z}
+   */
+  getTeamColorV3(team) {
+    return this.getTeamColor(team).v3
+  }
+
+  /**
+   * Get team color in hex format
+   * @param {string} team - Team type ('ct' or 't')
+   * @returns {string} - Hex color string
+   */
+  getTeamColorHex(team) {
+    return this.getTeamColor(team).hex
+  }
+
+  /**
+   * Get weapon icon key for HUD rendering
+   */
+  getWeaponIcon(weapon) {
+    return getWeaponIcon(weapon)
+  }
+
+  updateRemoteVisualState(playerId, state = {}) {
+    if (!playerId || playerId === this.playerId) return null
+    const current = this.remoteVisualStates.get(playerId)
+    const next = normalizePlayerVisualData(state, current || {
+      name: 'Player',
+      team: 'neutral',
+      hp: 100,
+      maxHp: 100,
+      weapon: 'unknown',
+      alive: true
+    })
+    this.remoteVisualStates.set(playerId, next)
+    this.emitVisualStateUpdate('update', playerId, next)
+    return next
+  }
+
+  removeRemoteVisualState(playerId) {
+    if (!playerId) return
+    if (this.remoteVisualStates.delete(playerId)) {
+      this.emitVisualStateUpdate('remove', playerId, null)
+    }
+  }
+
+  rebuildRemoteVisualStates(players) {
+    if (!Array.isArray(players)) return
+
+    const incomingIds = new Set()
+    for (const player of players) {
+      const playerId = this.extractPlayerId(player)
+      if (!playerId || playerId === this.playerId) continue
+      incomingIds.add(playerId)
+      this.updateRemoteVisualState(playerId, {
+        team: player.team,
+        hp: player.hp ?? player.health,
+        maxHp: player.maxHp ?? player.maxHealth,
+        name: player.username || player.name,
+        weapon: player.weapon || player.weaponType,
+        alive: player.alive
+      })
+    }
+
+    for (const playerId of this.remoteVisualStates.keys()) {
+      if (!incomingIds.has(playerId)) {
+        this.removeRemoteVisualState(playerId)
+      }
+    }
+  }
+
+  extractPlayerId(data) {
+    if (!data || typeof data !== 'object') return null
+    return data.playerId || data.id || data.socketId || data.targetId || null
+  }
+
+  extractHp(data, fallback = undefined) {
+    if (!data || typeof data !== 'object') return fallback
+    const hp = data.hp ?? data.health ?? data.currentHp
+    return typeof hp === 'number' ? hp : fallback
+  }
+
+  emitVisualStateUpdate(type, playerId, visualState) {
+    if (!this.onVisualStateUpdateCallback) return
+    this.onVisualStateUpdateCallback({
+      type,
+      playerId,
+      visualState: visualState ? { ...visualState } : null
+    })
+  }
+
+  setupVisualStateBridge() {
+    if (!this.socket || this.internalVisualBridgeBound) return
+    this.internalVisualBridgeBound = true
+
+    this.socket.on('playerMove', (data = {}) => {
+      const playerId = this.extractPlayerId(data)
+      if (!playerId || playerId === this.playerId) return
+      this.updateRemoteVisualState(playerId, {
+        team: data.team,
+        hp: this.extractHp(data),
+        maxHp: data.maxHp ?? data.maxHealth,
+        name: data.username || data.name,
+        weapon: data.weapon || data.weaponType,
+        alive: data.alive
+      })
+    })
+
+    this.socket.on('playerJoined', (data = {}) => {
+      if (Array.isArray(data.players)) {
+        this.rebuildRemoteVisualStates(data.players)
+      }
+
+      const playerId = this.extractPlayerId(data)
+      if (!playerId || playerId === this.playerId) return
+      this.updateRemoteVisualState(playerId, {
+        team: data.team,
+        hp: this.extractHp(data, 100),
+        maxHp: data.maxHp ?? data.maxHealth ?? 100,
+        name: data.username || data.name,
+        weapon: data.weapon || data.weaponType,
+        alive: data.alive
+      })
+    })
+
+    this.socket.on('playerLeft', (data = {}) => {
+      if (Array.isArray(data.players)) {
+        this.rebuildRemoteVisualStates(data.players)
+        return
+      }
+      const playerId = this.extractPlayerId(data)
+      if (!playerId) return
+      this.removeRemoteVisualState(playerId)
+    })
+
+    this.socket.on('roomUpdate', (data = {}) => {
+      if (Array.isArray(data.players)) {
+        this.rebuildRemoteVisualStates(data.players)
+      }
+    })
+
+    const updateHp = (data = {}) => {
+      const playerId = data.targetId || data.playerId || data.targetPlayerId
+      if (!playerId || playerId === this.playerId) return
+      const hp = this.extractHp(data)
+      if (typeof hp !== 'number') return
+      this.updateRemoteVisualState(playerId, {
+        hp,
+        alive: hp > 0
+      })
+    }
+
+    this.socket.on('damage', updateHp)
+    this.socket.on('playerDamaged', updateHp)
+
+    const onDeath = (data = {}) => {
+      const playerId = data.playerId || data.targetId || data.targetPlayerId
+      if (!playerId || playerId === this.playerId) return
+      this.updateRemoteVisualState(playerId, { hp: 0, alive: false })
+    }
+
+    this.socket.on('death', onDeath)
+    this.socket.on('playerDied', onDeath)
+
+    const onRespawn = (data = {}) => {
+      const playerId = data.playerId || data.targetId || data.targetPlayerId
+      if (!playerId || playerId === this.playerId) return
+      this.updateRemoteVisualState(playerId, {
+        hp: this.extractHp(data, 100),
+        maxHp: data.maxHp ?? data.maxHealth ?? 100,
+        alive: true
+      })
+    }
+
+    this.socket.on('respawn', onRespawn)
+    this.socket.on('playerRespawned', onRespawn)
+  }
 }
 
+export { TEAM_VISUALS as TEAM_COLORS, WEAPON_ICON_MAP as WEAPON_ICONS }
 export default MultiplayerClient

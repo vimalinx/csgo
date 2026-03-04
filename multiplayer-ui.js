@@ -3,6 +3,148 @@
  * Vanilla JavaScript UI components for multiplayer functionality
  */
 
+import { getTeamVisual, getWeaponIcon, normalizePlayerVisualData } from './multiplayer.js'
+
+const PLAYER_HEALTH_BAR_MAX_HP = 100
+const playerHealthBars = new Map()
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function toRgba(rgb, alpha = 1) {
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`
+}
+
+function clampHealth(value) {
+  const hp = Number(value)
+  if (!Number.isFinite(hp)) return PLAYER_HEALTH_BAR_MAX_HP
+  return Math.max(0, Math.min(PLAYER_HEALTH_BAR_MAX_HP, hp))
+}
+
+function getHealthBarColor(ratio) {
+  const safeRatio = Math.max(0, Math.min(1, ratio))
+  const hue = Math.round(safeRatio * 120) // 0: red, 60: yellow, 120: green
+  return `hsl(${hue}, 85%, 50%)`
+}
+
+function getHealthBarLayer() {
+  let layer = document.getElementById('playerHealthBarLayer')
+  if (layer) return layer
+
+  layer = document.createElement('div')
+  layer.id = 'playerHealthBarLayer'
+  layer.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 101;
+  `
+
+  document.body.appendChild(layer)
+  return layer
+}
+
+/**
+ * Create or update a floating health bar for a player
+ */
+export function createHealthBar(playerId, x, y, hp = PLAYER_HEALTH_BAR_MAX_HP) {
+  if (!playerId) return null
+
+  let healthBar = playerHealthBars.get(playerId)
+  if (!healthBar) {
+    const root = document.createElement('div')
+    root.id = `healthBar-${playerId}`
+    root.style.cssText = `
+      position: fixed;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      min-width: 60px;
+    `
+
+    const text = document.createElement('div')
+    text.style.cssText = `
+      font-size: 11px;
+      color: #fff;
+      text-align: center;
+      line-height: 1;
+      margin-bottom: 3px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    `
+
+    const track = document.createElement('div')
+    track.style.cssText = `
+      width: 56px;
+      height: 6px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 3px;
+      overflow: hidden;
+    `
+
+    const fill = document.createElement('div')
+    fill.style.cssText = `
+      height: 100%;
+      width: 100%;
+      background: hsl(120, 85%, 50%);
+      transition: width 0.08s linear, background-color 0.08s linear;
+    `
+
+    track.appendChild(fill)
+    root.appendChild(text)
+    root.appendChild(track)
+    getHealthBarLayer().appendChild(root)
+
+    healthBar = { root, text, fill }
+    playerHealthBars.set(playerId, healthBar)
+  }
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    healthBar.root.style.display = 'none'
+    return healthBar.root
+  }
+
+  const currentHp = clampHealth(hp)
+  const hpRatio = currentHp / PLAYER_HEALTH_BAR_MAX_HP
+
+  healthBar.text.textContent = `${Math.round(currentHp)}/${PLAYER_HEALTH_BAR_MAX_HP} HP`
+  healthBar.fill.style.width = `${(hpRatio * 100).toFixed(2)}%`
+  healthBar.fill.style.backgroundColor = getHealthBarColor(hpRatio)
+  healthBar.root.style.left = `${x}px`
+  healthBar.root.style.top = `${y}px`
+  healthBar.root.style.display = 'block'
+
+  return healthBar.root
+}
+
+/**
+ * Remove a player's floating health bar
+ */
+export function removeHealthBar(playerId) {
+  const healthBar = playerHealthBars.get(playerId)
+  if (!healthBar) return
+
+  healthBar.root.remove()
+  playerHealthBars.delete(playerId)
+
+  if (playerHealthBars.size === 0) {
+    const layer = document.getElementById('playerHealthBarLayer')
+    if (layer) layer.remove()
+  }
+}
+
+/**
+ * Clear all floating health bars
+ */
+export function clearHealthBars() {
+  for (const playerId of playerHealthBars.keys()) {
+    removeHealthBar(playerId)
+  }
+}
+
 /**
  * Create login UI overlay
  */
@@ -431,6 +573,34 @@ export function createMultiplayerHUD(multiplayer) {
   return hud
 }
 
+/**
+ * Create buy menu UI skeleton (tabs + weapon list + money display)
+ */
+export function createBuyMenuUI() {
+  const menu = document.getElementById('buyMenu')
+  const body = document.getElementById('buyMenuBody')
+  const notice = document.getElementById('buyNotice')
+  if (!menu || !body || !notice) return null
+
+  body.innerHTML = `
+    <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid rgba(99, 255, 159, 0.35); border-radius: 9px; background: rgba(99, 255, 159, 0.08);">
+      <span style="color: rgba(232, 238, 252, 0.85); font-size: 12px;">当前金钱</span>
+      <span id="buyMenuMoneyValue" class="mono" style="font-size: 13px; color: rgba(99, 255, 159, 1);">$800</span>
+    </div>
+    <div id="buyMenuTabs" style="grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px;"></div>
+    <div id="buyMenuList" style="grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;"></div>
+  `
+
+  return {
+    menuEl: menu,
+    bodyEl: body,
+    tabsEl: body.querySelector('#buyMenuTabs'),
+    listEl: body.querySelector('#buyMenuList'),
+    moneyEl: body.querySelector('#buyMenuMoneyValue'),
+    noticeEl: notice,
+  }
+}
+
 function updatePlayerList(container, players) {
   container.innerHTML = ''
 
@@ -445,6 +615,261 @@ function updatePlayerList(container, players) {
     playerEl.style.cssText = 'margin: 3px 0;'
     container.appendChild(playerEl)
   })
+}
+
+function getPlayerEntries(players) {
+  if (!players) return []
+
+  if (players instanceof Map) {
+    return Array.from(players.entries())
+  }
+
+  if (Array.isArray(players)) {
+    return players.map((player, index) => [
+      player.playerId || player.id || `player-${index}`,
+      player
+    ])
+  }
+
+  if (typeof players === 'object') {
+    return Object.entries(players)
+  }
+
+  return []
+}
+
+function drawWeaponShape(ctx, x, y, weaponType, scale, color) {
+  const s = Math.max(0.75, scale)
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.strokeStyle = color
+  ctx.fillStyle = color
+  ctx.lineWidth = Math.max(1, 1.2 * s)
+
+  if (weaponType === 'pistol') {
+    ctx.fillRect(-7 * s, -2 * s, 12 * s, 4 * s)
+    ctx.fillRect(-2 * s, 1 * s, 3 * s, 5 * s)
+  } else if (weaponType === 'smg') {
+    ctx.fillRect(-8 * s, -2 * s, 14 * s, 4 * s)
+    ctx.fillRect(-2 * s, 1 * s, 5 * s, 3 * s)
+    ctx.fillRect(-1 * s, 4 * s, 2 * s, 3 * s)
+  } else if (weaponType === 'shotgun') {
+    ctx.fillRect(-10 * s, -1.5 * s, 18 * s, 3 * s)
+    ctx.fillRect(-9 * s, 1.5 * s, 3 * s, 3 * s)
+  } else if (weaponType === 'sniper') {
+    ctx.fillRect(-11 * s, -1.5 * s, 20 * s, 3 * s)
+    ctx.beginPath()
+    ctx.arc(-2 * s, -3 * s, 2 * s, 0, Math.PI * 2)
+    ctx.fill()
+  } else if (weaponType === 'knife') {
+    ctx.beginPath()
+    ctx.moveTo(-8 * s, 3 * s)
+    ctx.lineTo(5 * s, -4 * s)
+    ctx.lineTo(8 * s, -2 * s)
+    ctx.lineTo(-5 * s, 5 * s)
+    ctx.closePath()
+    ctx.stroke()
+  } else if (weaponType === 'grenade') {
+    ctx.beginPath()
+    ctx.arc(0, 0, 4.5 * s, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.fillRect(-1 * s, -7 * s, 2 * s, 3 * s)
+  } else {
+    // rifle + unknown
+    ctx.fillRect(-10 * s, -2 * s, 18 * s, 4 * s)
+    ctx.fillRect(-10 * s, 1 * s, 3 * s, 4 * s)
+    ctx.fillRect(4 * s, 1 * s, 4 * s, 2 * s)
+  }
+
+  ctx.restore()
+}
+
+/**
+ * Create a player visualization renderer (team color, HP bar, name, weapon icon, billboard)
+ */
+export function createPlayerVisualizationSystem(options = {}) {
+  const renderCanvas = options.canvas
+  const worldToScreen = options.worldToScreen
+  const getCameraPosition = options.getCameraPosition
+  const layerId = options.layerId || 'playerUICanvas'
+  const zIndex = Number.isFinite(options.zIndex) ? options.zIndex : 10
+  const parent = options.parent || (renderCanvas ? renderCanvas.parentElement : null) || document.body
+
+  if (!renderCanvas) {
+    throw new Error('createPlayerVisualizationSystem: canvas is required')
+  }
+  if (typeof worldToScreen !== 'function') {
+    throw new Error('createPlayerVisualizationSystem: worldToScreen must be a function')
+  }
+  if (typeof getCameraPosition !== 'function') {
+    throw new Error('createPlayerVisualizationSystem: getCameraPosition must be a function')
+  }
+
+  let uiCanvas = document.getElementById(layerId)
+  if (!uiCanvas) {
+    uiCanvas = document.createElement('canvas')
+    uiCanvas.id = layerId
+    uiCanvas.style.position = 'absolute'
+    uiCanvas.style.top = '0'
+    uiCanvas.style.left = '0'
+    uiCanvas.style.width = '100%'
+    uiCanvas.style.height = '100%'
+    uiCanvas.style.pointerEvents = 'none'
+    uiCanvas.style.zIndex = String(zIndex)
+    parent.appendChild(uiCanvas)
+  }
+
+  const ctx = uiCanvas.getContext('2d')
+  let enabled = true
+
+  function syncSize() {
+    if (!uiCanvas) return
+    const width = renderCanvas.width
+    const height = renderCanvas.height
+    if (uiCanvas.width !== width || uiCanvas.height !== height) {
+      uiCanvas.width = width
+      uiCanvas.height = height
+    }
+  }
+
+  function clear() {
+    if (!ctx || !uiCanvas) return
+    syncSize()
+    ctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height)
+  }
+
+  function drawBillboard(playerId, rawPlayerData) {
+    const playerData = rawPlayerData || {}
+    const position = playerData.position || playerData.pos
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
+      return
+    }
+
+    const teamVisual = getTeamVisual(playerData.team)
+    const visual = normalizePlayerVisualData(playerData, {
+      name: 'Player',
+      hp: 100,
+      maxHp: 100,
+      team: teamVisual.key,
+      weapon: 'unknown'
+    })
+
+    const cameraPos = getCameraPosition()
+    if (!cameraPos || !Number.isFinite(cameraPos.x) || !Number.isFinite(cameraPos.y) || !Number.isFinite(cameraPos.z)) {
+      return
+    }
+
+    const distance = Math.max(
+      0.001,
+      Math.hypot(
+        position.x - cameraPos.x,
+        position.y - cameraPos.y,
+        position.z - cameraPos.z
+      )
+    )
+    const billboardScale = clamp(1.75 / Math.sqrt(distance), 0.65, 1.45)
+    const anchor = worldToScreen({
+      x: position.x,
+      y: position.y + 2.25,
+      z: position.z
+    })
+    if (!anchor) return
+
+    const panelWidth = 84 * billboardScale
+    const panelHeight = 38 * billboardScale
+    const panelX = anchor.x - panelWidth / 2
+    const panelY = anchor.y - panelHeight - 12 * billboardScale
+
+    const hpRatio = clamp(visual.healthRatio, 0, 1)
+    const healthColor = getHealthBarColor(hpRatio)
+    const iconColor = visual.alive ? teamVisual.hex : '#666666'
+
+    ctx.save()
+    ctx.globalAlpha = visual.alive ? 1 : 0.4
+
+    // Screen-space panel: behaves like billboard (always facing camera)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillRect(panelX, panelY, panelWidth, panelHeight)
+    ctx.strokeStyle = toRgba(teamVisual.rgb, 0.65)
+    ctx.lineWidth = Math.max(1, billboardScale)
+    ctx.strokeRect(panelX, panelY, panelWidth, panelHeight)
+
+    const nameY = panelY + 10.5 * billboardScale
+    ctx.font = `${Math.round(12 * billboardScale)}px Arial, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.lineWidth = Math.max(2, 2.5 * billboardScale)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.95)'
+    ctx.fillStyle = teamVisual.hex
+    ctx.strokeText(visual.name, anchor.x, nameY)
+    ctx.fillText(visual.name, anchor.x, nameY)
+
+    const hpBarWidth = 62 * billboardScale
+    const hpBarHeight = 6 * billboardScale
+    const hpBarX = anchor.x - hpBarWidth / 2
+    const hpBarY = panelY + 18 * billboardScale
+    ctx.fillStyle = 'rgba(10, 10, 10, 0.85)'
+    ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight)
+    ctx.fillStyle = healthColor
+    ctx.fillRect(hpBarX + 1, hpBarY + 1, (hpBarWidth - 2) * hpRatio, Math.max(0, hpBarHeight - 2))
+    ctx.strokeStyle = toRgba(teamVisual.rgb, 0.75)
+    ctx.lineWidth = Math.max(1, billboardScale * 0.9)
+    ctx.strokeRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight)
+
+    const weaponType = visual.weapon
+    const weaponIconLabel = getWeaponIcon(weaponType)
+    const iconY = panelY + 30 * billboardScale
+    drawWeaponShape(ctx, anchor.x - 12 * billboardScale, iconY, weaponType, billboardScale, iconColor)
+    ctx.textAlign = 'left'
+    ctx.font = `${Math.round(9 * billboardScale)}px monospace`
+    ctx.fillStyle = '#F0F0F0'
+    ctx.fillText(weaponIconLabel, anchor.x - 2 * billboardScale, iconY + 1 * billboardScale)
+
+    if (!visual.alive) {
+      ctx.textAlign = 'right'
+      ctx.font = `${Math.round(8 * billboardScale)}px monospace`
+      ctx.fillStyle = '#FF6666'
+      ctx.fillText('DEAD', panelX + panelWidth - 4 * billboardScale, panelY + 30 * billboardScale)
+    }
+
+    ctx.restore()
+  }
+
+  function render(players) {
+    if (!ctx || !uiCanvas) return
+    syncSize()
+    ctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height)
+    if (!enabled) return
+
+    const entries = getPlayerEntries(players)
+    for (const [playerId, playerData] of entries) {
+      drawBillboard(playerId, playerData)
+    }
+  }
+
+  function destroy() {
+    clear()
+    if (uiCanvas && uiCanvas.parentElement) {
+      uiCanvas.parentElement.removeChild(uiCanvas)
+    }
+    uiCanvas = null
+  }
+
+  function setEnabled(nextEnabled) {
+    enabled = Boolean(nextEnabled)
+    if (!enabled) {
+      clear()
+    }
+  }
+
+  return {
+    render,
+    clear,
+    destroy,
+    syncSize,
+    setEnabled,
+    getCanvas: () => uiCanvas
+  }
 }
 
 /**
@@ -926,4 +1351,3 @@ export function toggleChatInput(visible) {
     chatInput.focus()
   }
 }
-
