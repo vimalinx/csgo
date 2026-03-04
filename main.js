@@ -2391,6 +2391,10 @@ function setupMultiplayerListeners() {
         position: data.position,
         rotation: data.rotation,
         velocity: data.velocity,
+        team: data.team || 'ct', // 添加阵营
+        hp: data.hp || 100, // 添加血量
+        name: data.username || 'Player', // 添加名字
+        weapon: data.weapon || 'rifle', // 添加武器类型
         timestamp: Date.now()
       })
     }
@@ -2423,11 +2427,94 @@ function setupMultiplayerListeners() {
     alert('与服务器的连接断开')
     returnToLobby()
   })
-  
+
   multiplayer.onError((error) => {
     console.error('多人游戏错误:', error)
     setStatus('网络错误: ' + error, true)
   })
+
+  // Tab键计分板监听
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && game.mode === 'online') {
+      e.preventDefault()
+      const scoreboard = document.getElementById('scoreboard')
+      if (scoreboard) {
+        scoreboard.style.display = 'block'
+      }
+    }
+  })
+
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Tab' && game.mode === 'online') {
+      const scoreboard = document.getElementById('scoreboard')
+      if (scoreboard) {
+        scoreboard.style.display = 'none'
+      }
+    }
+  })
+}
+
+/**
+ * Update multiplayer scoreboard data
+ */
+function updateMultiplayerScoreboard() {
+  if (game.mode !== 'online') return
+
+  // 收集所有玩家数据
+  const ctPlayers = []
+  const tPlayers = []
+
+  // 添加本地玩家
+  const localPlayerData = {
+    name: multiplayer.username || 'You',
+    kills: game.stats.kills || 0,
+    deaths: game.stats.deaths || 0,
+    assists: game.stats.assists || 0,
+    money: game.money || 800,
+    ping: 0 // 本地玩家延迟为0
+  }
+
+  if (game.team === 'ct') {
+    ctPlayers.push(localPlayerData)
+  } else {
+    tPlayers.push(localPlayerData)
+  }
+
+  // 添加其他玩家
+  for (const [playerId, playerData] of otherPlayers) {
+    const playerScoreData = {
+      name: playerData.name || 'Player',
+      kills: playerData.kills || 0,
+      deaths: playerData.deaths || 0,
+      assists: playerData.assists || 0,
+      money: playerData.money || 800,
+      ping: playerData.ping || Math.floor(Math.random() * 100) // 模拟延迟
+    }
+
+    if (playerData.team === 'ct') {
+      ctPlayers.push(playerScoreData)
+    } else {
+      tPlayers.push(playerScoreData)
+    }
+  }
+
+  // 更新计分板
+  const scoreboardData = {
+    ct: ctPlayers,
+    t: tPlayers
+  }
+
+  // 确保计分板存在
+  let scoreboard = document.getElementById('scoreboard')
+  if (!scoreboard) {
+    import('./multiplayer-ui.js').then(module => {
+      module.createScoreboard(scoreboardData)
+    })
+  } else {
+    import('./multiplayer-ui.js').then(module => {
+      module.updateScoreboard(scoreboardData)
+    })
+  }
 }
 
 /**
@@ -4508,24 +4595,31 @@ function drawWorld() {
     for (const [playerId, playerData] of otherPlayers) {
       const pos = playerData.position
       const rotation = playerData.rotation
-      
-      // Use CT palette for other players (can be customized later)
+
+      // 根据阵营设置颜色
+      const teamColor = playerData.team === 'ct'
+        ? v3(0.29, 0.56, 0.89)  // CT 蓝色 #4A90E2
+        : playerData.team === 't'
+        ? v3(0.89, 0.29, 0.29)  // T 红色 #E24A4A
+        : v3(0.5, 0.5, 0.5)     // 默认灰色
+
       const pal = {
-        body: v3(0.22, 0.38, 0.78),
+        body: teamColor,
         hurt: v3(0.95, 0.22, 0.24),
         head: v3(0.15, 0.20, 0.30),
-        arm: v3(0.20, 0.30, 0.62),
-        leg: v3(0.16, 0.22, 0.45),
+        arm: v3(teamColor.x * 0.8, teamColor.y * 0.8, teamColor.z * 0.8),
+        leg: v3(teamColor.x * 0.6, teamColor.y * 0.6, teamColor.z * 0.6),
         gun: v3(0.12, 0.12, 0.14),
       }
-      
+
       // Convert rotation to yaw (pitch is used for looking up/down, yaw for left/right)
       const yaw = rotation.y || 0
-      
+      const hp = playerData.hp || 100
+
       drawHumanoid(
         v3(pos.x, pos.y, pos.z),
         yaw,
-        100, // HP (we don't track other players' HP yet)
+        hp,
         100,
         pal
       )
@@ -4723,6 +4817,159 @@ function drawWorld() {
   gl.bindVertexArray(null);
 }
 
+/**
+ * 渲染其他玩家的 UI 元素（血量条、名字标签、武器图标）
+ * 使用 Canvas 2D 绘制
+ */
+function renderOtherPlayersUI() {
+  if (game.mode !== 'online') return
+
+  // 创建一个 2D canvas 用于绘制 UI（如果还没有）
+  let uiCanvas = document.getElementById('playerUICanvas')
+  if (!uiCanvas) {
+    uiCanvas = document.createElement('canvas')
+    uiCanvas.id = 'playerUICanvas'
+    uiCanvas.style.position = 'absolute'
+    uiCanvas.style.top = '0'
+    uiCanvas.style.left = '0'
+    uiCanvas.style.width = '100%'
+    uiCanvas.style.height = '100%'
+    uiCanvas.style.pointerEvents = 'none'
+    uiCanvas.style.zIndex = '10'
+    uiCanvas.width = canvas.width
+    uiCanvas.height = canvas.height
+    canvas.parentElement.appendChild(uiCanvas)
+  }
+
+  // 确保 canvas 尺寸匹配
+  if (uiCanvas.width !== canvas.width || uiCanvas.height !== canvas.height) {
+    uiCanvas.width = canvas.width
+    uiCanvas.height = canvas.height
+  }
+
+  const ctx = uiCanvas.getContext('2d')
+  ctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height)
+
+  for (const [playerId, playerData] of otherPlayers) {
+    const pos = playerData.position
+    const playerPos = v3(pos.x, pos.y, pos.z)
+
+    // 1. 绘制血量条（玩家头顶 2.2 米处）
+    const healthBarPos = worldToScreen(v3(pos.x, pos.y + 2.2, pos.z))
+    if (healthBarPos) {
+      const hp = playerData.hp || 100
+      const hpRatio = hp / 100
+
+      // 血量条尺寸
+      const barWidth = 50
+      const barHeight = 5
+      const x = healthBarPos.x - barWidth / 2
+      const y = healthBarPos.y - barHeight / 2
+
+      // 背景（黑色）
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
+      ctx.fillRect(x, y, barWidth, barHeight)
+
+      // 血量（绿→红渐变）
+      const red = Math.floor(244 * (1 - hpRatio) + 76 * hpRatio)
+      const green = Math.floor(67 * (1 - hpRatio) + 175 * hpRatio)
+      ctx.fillStyle = `rgb(${red}, ${green}, 50)`
+      ctx.fillRect(x, y, barWidth * hpRatio, barHeight)
+
+      // 边框
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(x, y, barWidth, barHeight)
+    }
+
+    // 2. 绘制玩家名字（血量条上方，2.4 米处）
+    const namePos = worldToScreen(v3(pos.x, pos.y + 2.4, pos.z))
+    if (namePos) {
+      ctx.font = '14px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      // 黑色描边
+      ctx.strokeStyle = 'black'
+      ctx.lineWidth = 3
+      ctx.strokeText(playerData.name || 'Player', namePos.x, namePos.y)
+
+      // 白色文字
+      ctx.fillStyle = 'white'
+      ctx.fillText(playerData.name || 'Player', namePos.x, namePos.y)
+    }
+
+    // 3. 绘制武器图标（玩家右手位置）
+    const weaponPos = worldToScreen(v3(pos.x + 0.5, pos.y + 1.0, pos.z))
+    if (weaponPos) {
+      const weapon = playerData.weapon || 'rifle'
+      const iconWidth = weapon === 'pistol' ? 8 : 20
+      const iconHeight = 4
+
+      ctx.fillStyle = 'rgba(80, 80, 80, 0.8)'
+      ctx.fillRect(weaponPos.x - iconWidth / 2, weaponPos.y - iconHeight / 2, iconWidth, iconHeight)
+
+      // 武器边框
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(weaponPos.x - iconWidth / 2, weaponPos.y - iconHeight / 2, iconWidth, iconHeight)
+    }
+  }
+}
+
+/**
+ * 将 3D 世界坐标转换为 2D 屏幕坐标
+ */
+function worldToScreen(worldPos) {
+  try {
+    // 使用相机的视图和投影矩阵转换
+    const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z)
+    const fwd = forwardFromYawPitch(game.yaw, game.pitch)
+    const camTarget = v3add(camPos, fwd)
+
+    const view = mat4Identity()
+    mat4LookAt(view, camPos, camTarget, v3(0, 1, 0))
+
+    const aspect = glsys.width / Math.max(1, glsys.height)
+    const proj = mat4Identity()
+    const fovDeg = 70 / (game.scope.active ? game.scope.zoomLevel : 1)
+    mat4Perspective(proj, (fovDeg * Math.PI) / 180, aspect, 0.05, 120)
+
+    // 转换到视图空间
+    const viewPos = mat4TransformPoint(view, worldPos)
+
+    // 裁剪（如果在相机后面，返回 null）
+    if (viewPos.z > -0.05) return null
+
+    // 转换到裁剪空间
+    const clipPos = mat4TransformPoint(proj, viewPos)
+
+    // 转换到屏幕坐标
+    const screenX = (clipPos.x + 1) / 2 * canvas.width
+    const screenY = (1 - clipPos.y) / 2 * canvas.height
+
+    // 检查是否在屏幕范围内
+    if (screenX < 0 || screenX > canvas.width || screenY < 0 || screenY > canvas.height) {
+      return null
+    }
+
+    return { x: screenX, y: screenY }
+  } catch (error) {
+    return null
+  }
+}
+
+/**
+ * 矩阵变换点
+ */
+function mat4TransformPoint(m, p) {
+  const x = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12]
+  const y = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13]
+  const z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14]
+  const w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15]
+  return v3(x / w, y / w, z / w)
+}
+
 let last = nowMs();
 function frame() {
   const t = nowMs();
@@ -4759,6 +5006,13 @@ function frame() {
   updateHud();
   drawWorld();
   minimap.render();
+  renderOtherPlayersUI(); // 渲染其他玩家的 UI 元素
+
+  // 更新计分板（多人模式）
+  if (game.mode === 'online' && frameCount % 60 === 0) { // 每秒更新一次（60帧）
+    updateMultiplayerScoreboard()
+  }
+
   requestAnimationFrame(frame);
 }
 

@@ -646,3 +646,284 @@ export function updateWaitingPlayerList(multiplayer, players) {
     playerList.appendChild(playerDiv)
   })
 }
+
+/**
+ * Create scoreboard UI
+ */
+export function createScoreboard(scoreboardData) {
+  // Remove existing scoreboard
+  const existingScoreboard = document.getElementById('scoreboard')
+  if (existingScoreboard) {
+    existingScoreboard.remove()
+  }
+
+  // Create scoreboard container
+  const scoreboard = document.createElement('div')
+  scoreboard.id = 'scoreboard'
+  scoreboard.style.cssText = `
+    position: fixed;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 2px solid #444;
+    border-radius: 10px;
+    padding: 20px;
+    z-index: 10001;
+    color: white;
+    font-family: Arial, sans-serif;
+    display: none;
+  `
+
+  // Title
+  const title = document.createElement('div')
+  title.textContent = 'CSGO 计分板'
+  title.style.cssText = `
+    font-size: 20px;
+    color: #4CAF50;
+    font-weight: bold;
+    text-align: center;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #444;
+    margin-bottom: 15px;
+  `
+  scoreboard.appendChild(title)
+
+  // Table header
+  const header = document.createElement('div')
+  header.style.cssText = `
+    display: flex;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 8px 0;
+    font-weight: bold;
+    font-size: 12px;
+    border-radius: 3px;
+    margin-bottom: 10px;
+  `
+  header.innerHTML = `
+    <div style="width: 150px; padding-left: 10px;">玩家名</div>
+    <div style="width: 50px; text-align: center;">K</div>
+    <div style="width: 50px; text-align: center;">D</div>
+    <div style="width: 50px; text-align: center;">A</div>
+    <div style="width: 60px; text-align: center;">KDA</div>
+    <div style="width: 80px; text-align: center;">金钱</div>
+    <div style="width: 60px; text-align: center;">延迟</div>
+  `
+  scoreboard.appendChild(header)
+
+  // Teams container
+  const teamsContainer = document.createElement('div')
+  teamsContainer.id = 'scoreboardTeams'
+  scoreboard.appendChild(teamsContainer)
+
+  document.body.appendChild(scoreboard)
+
+  return scoreboard
+}
+
+/**
+ * Update scoreboard data
+ */
+export function updateScoreboard(scoreboardData) {
+  const teamsContainer = document.getElementById('scoreboardTeams')
+  if (!teamsContainer) return
+
+  teamsContainer.innerHTML = ''
+
+  // Helper function to get money color
+  function getMoneyColor(money) {
+    if (money >= 1000) return '#4CAF50'
+    if (money >= 500) return '#FFC107'
+    return '#F44336'
+  }
+
+  // Helper function to get ping color
+  function getPingColor(ping) {
+    if (ping < 50) return '#4CAF50'
+    if (ping < 100) return '#FFC107'
+    return '#F44336'
+  }
+
+  // Helper function to calculate KDA
+  function calculateKDA(kills, deaths, assists) {
+    if (deaths === 0) return kills.toFixed(2)
+    return ((kills + assists / 2) / deaths).toFixed(2)
+  }
+
+  // Helper function to render team
+  function renderTeam(teamName, teamData, teamColor) {
+    if (!teamData || teamData.length === 0) return
+
+    // Team header
+    const teamHeader = document.createElement('div')
+    teamHeader.style.cssText = `
+      color: ${teamColor};
+      font-weight: bold;
+      font-size: 14px;
+      padding: 8px 0 5px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    `
+    teamHeader.textContent = teamName === 'ct' ? 'CT (反恐精英)' : 'T (恐怖分子)'
+    teamsContainer.appendChild(teamHeader)
+
+    // Sort players by KDA (descending)
+    const sortedPlayers = [...teamData].sort((a, b) => {
+      const kdaA = parseFloat(calculateKDA(a.kills || 0, a.deaths || 0, a.assists || 0))
+      const kdaB = parseFloat(calculateKDA(b.kills || 0, b.deaths || 0, b.assists || 0))
+      return kdaB - kdaA
+    })
+
+    // Render players
+    sortedPlayers.forEach(player => {
+      const playerRow = document.createElement('div')
+      playerRow.style.cssText = `
+        display: flex;
+        padding: 6px 0;
+        font-size: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      `
+
+      const kda = calculateKDA(player.kills || 0, player.deaths || 0, player.assists || 0)
+      const moneyColor = getMoneyColor(player.money || 0)
+      const pingColor = getPingColor(player.ping || 0)
+
+      playerRow.innerHTML = `
+        <div style="width: 150px; padding-left: 10px; color: white;">${player.name || 'Unknown'}</div>
+        <div style="width: 50px; text-align: center; color: white;">${player.kills || 0}</div>
+        <div style="width: 50px; text-align: center; color: white;">${player.deaths || 0}</div>
+        <div style="width: 50px; text-align: center; color: white;">${player.assists || 0}</div>
+        <div style="width: 60px; text-align: center; color: #4CAF50;">${kda}</div>
+        <div style="width: 80px; text-align: center; color: ${moneyColor};">$${player.money || 0}</div>
+        <div style="width: 60px; text-align: center; color: ${pingColor};">${player.ping || 0}ms</div>
+      `
+
+      teamsContainer.appendChild(playerRow)
+    })
+  }
+
+  // Render CT team
+  renderTeam('ct', scoreboardData.ct, '#2196F3')
+
+  // Render T team
+  renderTeam('t', scoreboardData.t, '#F44336')
+}
+
+/**
+ * Show/hide scoreboard
+ */
+export function toggleScoreboard(visible) {
+  const scoreboard = document.getElementById('scoreboard')
+  if (!scoreboard) return
+
+  scoreboard.style.display = visible ? 'block' : 'none'
+}
+
+/**
+ * Create chat system UI
+ */
+export function createChatUI() {
+  // 聊天容器
+  const chatContainer = document.createElement('div')
+  chatContainer.id = 'chatContainer'
+  chatContainer.style.cssText = `
+    position: fixed;
+    bottom: 50px;
+    left: 10px;
+    width: 300px;
+    z-index: 10000;
+    font-family: Arial, sans-serif;
+  `
+
+  // 聊天历史
+  const chatHistory = document.createElement('div')
+  chatHistory.id = 'chatHistory'
+  chatHistory.style.cssText = `
+    width: 100%;
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px;
+    margin-bottom: 5px;
+    border-radius: 3px;
+  `
+  chatContainer.appendChild(chatHistory)
+
+  // 聊天输入框
+  const chatInput = document.createElement('input')
+  chatInput.id = 'chatInput'
+  chatInput.type = 'text'
+  chatInput.placeholder = '按 Enter 发送消息 (全局)'
+  chatInput.maxLength = 100
+  chatInput.style.cssText = `
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: white;
+    display: none;
+  `
+  chatContainer.appendChild(chatInput)
+
+  document.body.appendChild(chatContainer)
+
+  return chatContainer
+}
+
+/**
+ * Add chat message to history
+ */
+export function addChatMessage(channel, playerName, message) {
+  const chatHistory = document.getElementById('chatHistory')
+  if (!chatHistory) return
+
+  const messageEl = document.createElement('div')
+  messageEl.style.cssText = `
+    padding: 3px 0;
+    font-size: 12px;
+    opacity: 1;
+    transition: opacity 0.5s ease-in-out;
+  `
+
+  // 格式化时间
+  const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+
+  // 根据频道设置颜色
+  let channelColor = 'white'
+  if (channel === 'team') {
+    channelColor = '#4A90E2' // CT蓝色（简化，实际应根据玩家阵营）
+  }
+
+  messageEl.innerHTML = `<span style="color: #888;">[${time}]</span> <span style="color: ${channelColor};">[${channel === 'global' ? '全局' : '队伍'}]</span> <span style="color: white;">${playerName}:</span> <span style="color: #ddd;">${message}</span>`
+
+  chatHistory.appendChild(messageEl)
+
+  // 自动滚动到底部
+  chatHistory.scrollTop = chatHistory.scrollHeight
+
+  // 5秒后淡出
+  setTimeout(() => {
+    messageEl.style.opacity = '0.5'
+  }, 5000)
+
+  // 保持最近10条消息
+  while (chatHistory.children.length > 10) {
+    chatHistory.removeChild(chatHistory.firstChild)
+  }
+}
+
+/**
+ * Toggle chat input visibility
+ */
+export function toggleChatInput(visible) {
+  const chatInput = document.getElementById('chatInput')
+  if (!chatInput) return
+
+  chatInput.style.display = visible ? 'block' : 'none'
+  if (visible) {
+    chatInput.focus()
+  }
+}
+

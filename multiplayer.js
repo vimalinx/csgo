@@ -248,6 +248,28 @@ class MultiplayerClient {
   }
 
   /**
+   * Send chat message
+   */
+  sendChat(message, channel = 'global') {
+    if (this.roomId && this.socket && this.isConnected) {
+      this.socket.emit('chat', {
+        roomId: this.roomId,
+        message,
+        channel
+      })
+    }
+  }
+
+  /**
+   * Set callback for chat messages
+   */
+  onChat(callback) {
+    if (this.socket) {
+      this.socket.on('chat', callback)
+    }
+  }
+
+  /**
    * Set callback for room list updates
    */
   onRoomList(callback) {
@@ -344,6 +366,19 @@ class MultiplayerClient {
       this.roomId = null
       this.playerId = null
       this.username = null
+    }
+  }
+
+  /**
+   * Get scoreboard data
+   * Returns all players' score data
+   */
+  getScoreboardData() {
+    // This method will be called from the game to get player stats
+    // The actual implementation will depend on how player stats are stored in the game
+    return {
+      ct: [],
+      t: []
     }
   }
 }
