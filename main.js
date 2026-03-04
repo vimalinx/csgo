@@ -307,84 +307,160 @@ function aabbFromCenter(p, half) {
 }
 
 // ============================================================================
-// Spatial Grid for Collision Optimization (60 FPS Target)
+// AABB Quadtree Broad-Phase (XZ plane)
 // ============================================================================
-class SpatialGrid {
-  constructor(cellSize = 16, worldMin = -100, worldMax = 100) {
-    this.cellSize = cellSize;
-    this.worldMin = worldMin;
-    this.worldMax = worldMax;
-    this.gridSize = Math.ceil((worldMax - worldMin) / cellSize);
-    this.cells = new Map();
+function makeAabb2(minX, minZ, maxX, maxZ) {
+  return { minX, minZ, maxX, maxZ };
+}
+
+function aabb2Intersects(a, b) {
+  return (
+    a.minX <= b.maxX &&
+    a.maxX >= b.minX &&
+    a.minZ <= b.maxZ &&
+    a.maxZ >= b.minZ
+  );
+}
+
+function aabb2Contains(outer, inner) {
+  return (
+    inner.minX >= outer.minX &&
+    inner.maxX <= outer.maxX &&
+    inner.minZ >= outer.minZ &&
+    inner.maxZ <= outer.maxZ
+  );
+}
+
+function aabb3To2(aabb) {
+  return makeAabb2(aabb.min.x, aabb.min.z, aabb.max.x, aabb.max.z);
+}
+
+function raySweepAabb2(ro, rd, maxDist, pad = 1.2) {
+  const d = Math.max(0, maxDist);
+  const endX = ro.x + rd.x * d;
+  const endZ = ro.z + rd.z * d;
+  return makeAabb2(
+    Math.min(ro.x, endX) - pad,
+    Math.min(ro.z, endZ) - pad,
+    Math.max(ro.x, endX) + pad,
+    Math.max(ro.z, endZ) + pad
+  );
+}
+
+function playerBroadPhaseAabb(basePos) {
+  // Covers all hit zones (head/torso/legs) regardless of yaw.
+  return aabbFromCenter(v3(basePos.x, basePos.y + 1.1, basePos.z), v3(0.6, 1.1, 0.6));
+}
+
+class AabbQuadtreeNode {
+  constructor(bounds, depth, maxDepth, capacity) {
+    this.bounds = bounds;
+    this.depth = depth;
+    this.maxDepth = maxDepth;
+    this.capacity = capacity;
+    this.items = [];
+    this.children = null;
   }
 
   clear() {
-    this.cells.clear();
-  }
-
-  _cellKey(cx, cy, cz) {
-    return `${cx},${cy},${cz}`;
-  }
-
-  _toCellCoord(x, y, z) {
-    return {
-      cx: Math.floor((x - this.worldMin) / this.cellSize),
-      cy: Math.floor((y - this.worldMin) / this.cellSize),
-      cz: Math.floor((z - this.worldMin) / this.cellSize)
-    };
-  }
-
-  // Insert entity into all cells its AABB overlaps
-  insert(entity, aabb) {
-    const minC = this._toCellCoord(aabb.min.x, aabb.min.y, aabb.min.z);
-    const maxC = this._toCellCoord(aabb.max.x, aabb.max.y, aabb.max.z);
-
-    for (let cx = minC.cx; cx <= maxC.cx; cx++) {
-      for (let cy = minC.cy; cy <= maxC.cy; cy++) {
-        for (let cz = minC.cz; cz <= maxC.cz; cz++) {
-          const key = this._cellKey(cx, cy, cz);
-          if (!this.cells.has(key)) {
-            this.cells.set(key, []);
-          }
-          this.cells.get(key).push(entity);
-        }
-      }
+    this.items.length = 0;
+    if (this.children) {
+      for (const child of this.children) child.clear();
     }
+    this.children = null;
   }
 
-  // Get potential candidates near a ray (for broad phase culling)
-  getRayCandidates(ro, rd, maxDist = 80) {
-    const candidates = new Set();
-    const steps = 20;
-    const stepSize = maxDist / steps;
+  subdivide() {
+    if (this.children) return;
+    const midX = (this.bounds.minX + this.bounds.maxX) * 0.5;
+    const midZ = (this.bounds.minZ + this.bounds.maxZ) * 0.5;
+    const d = this.depth + 1;
+    this.children = [
+      new AabbQuadtreeNode(makeAabb2(this.bounds.minX, this.bounds.minZ, midX, midZ), d, this.maxDepth, this.capacity),
+      new AabbQuadtreeNode(makeAabb2(midX, this.bounds.minZ, this.bounds.maxX, midZ), d, this.maxDepth, this.capacity),
+      new AabbQuadtreeNode(makeAabb2(this.bounds.minX, midZ, midX, this.bounds.maxZ), d, this.maxDepth, this.capacity),
+      new AabbQuadtreeNode(makeAabb2(midX, midZ, this.bounds.maxX, this.bounds.maxZ), d, this.maxDepth, this.capacity),
+    ];
+  }
 
-    for (let i = 0; i <= steps; i++) {
-      const t = i * stepSize;
-      const px = ro.x + rd.x * t;
-      const py = ro.y + rd.y * t;
-      const pz = ro.z + rd.z * t;
-
-      const { cx, cy, cz } = this._toCellCoord(px, py, pz);
-
-      // Check 3x3x3 neighborhood at each step
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dz = -1; dz <= 1; dz++) {
-            const key = this._cellKey(cx + dx, cy + dy, cz + dz);
-            const cell = this.cells.get(key);
-            if (cell) {
-              for (const e of cell) candidates.add(e);
-            }
-          }
-        }
-      }
+  childFor(aabb) {
+    if (!this.children) return null;
+    for (const child of this.children) {
+      if (aabb2Contains(child.bounds, aabb)) return child;
     }
-    return Array.from(candidates);
+    return null;
+  }
+
+  insert(item) {
+    const aabb = item && item.aabb2;
+    if (!aabb || !aabb2Intersects(this.bounds, aabb)) return false;
+
+    if (this.children) {
+      const child = this.childFor(aabb);
+      if (child) return child.insert(item);
+    }
+
+    if (this.items.length < this.capacity || this.depth >= this.maxDepth) {
+      this.items.push(item);
+      return true;
+    }
+
+    if (!this.children) this.subdivide();
+
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const existing = this.items[i];
+      const child = this.childFor(existing.aabb2);
+      if (!child) continue;
+      this.items.splice(i, 1);
+      child.insert(existing);
+    }
+
+    const child = this.childFor(aabb);
+    if (child) return child.insert(item);
+    this.items.push(item);
+    return true;
+  }
+
+  query(range, outSet) {
+    if (!aabb2Intersects(this.bounds, range)) return;
+
+    for (const item of this.items) {
+      if (aabb2Intersects(item.aabb2, range)) outSet.add(item);
+    }
+
+    if (!this.children) return;
+    for (const child of this.children) {
+      child.query(range, outSet);
+    }
   }
 }
 
-// Global spatial grid instance
-let entityGrid = new SpatialGrid(16, -100, 100);
+class AabbQuadtree {
+  constructor(bounds = makeAabb2(-128, -128, 128, 128), maxDepth = 6, capacity = 8) {
+    this.bounds = bounds;
+    this.maxDepth = maxDepth;
+    this.capacity = capacity;
+    this.root = new AabbQuadtreeNode(bounds, 0, maxDepth, capacity);
+  }
+
+  clear() {
+    this.root.clear();
+  }
+
+  insert(item, aabb2) {
+    if (!item || !aabb2) return false;
+    item.aabb2 = aabb2;
+    return this.root.insert(item);
+  }
+
+  query(range) {
+    const out = new Set();
+    this.root.query(range, out);
+    return Array.from(out);
+  }
+}
+
+const COLLISION_QUADTREE_BOUNDS = makeAabb2(-128, -128, 128, 128);
 
 // Performance monitoring for collision detection
 const collisionPerf = {
@@ -408,6 +484,17 @@ const HITZONE_CONFIG = {
   torso: { mult: 1.0, priority: 2 },
   legs: { mult: 0.75, priority: 3 }
 };
+
+const HITZONE_FEEDBACK = {
+  head: { label: 'HEADSHOT', color: '255, 82, 82' },
+  torso: { label: 'TORSO', color: '255, 232, 153' },
+  legs: { label: 'LEGS', color: '140, 210, 255' }
+};
+
+function getHitZoneFeedback(zone) {
+  if (zone && HITZONE_FEEDBACK[zone]) return HITZONE_FEEDBACK[zone];
+  return { label: 'BODY', color: '255, 232, 153' };
+}
 
 // Build player hitboxes (7 zones: head, upper torso, lower torso, 2 arms, 2 legs)
 function buildPlayerHitboxes(basePos, yaw = 0) {
@@ -4838,93 +4925,86 @@ function updateWeapon(dt) {
     bestTarget = null;
   }
 
-  // AI Bot collision detection with optimized multi-zone hitboxes
+  // AABB 四叉树宽相 + OBB 部位窄相
   collisionPerf.rayCasts++;
-  const botCandidates = game.bots.filter(b => b.alive);
-  collisionPerf.broadPhaseCandidates += botCandidates.length;
+  const maxTargetDist = Math.min(90, Number.isFinite(bestT) ? bestT : 90);
+  const queryAabb = raySweepAabb2(roAim, rdAim, maxTargetDist, 1.4);
+  const targetTree = new AabbQuadtree(COLLISION_QUADTREE_BOUNDS, 6, 8);
 
-  for (const bot of botCandidates) {
-    const base = v3(bot.pos.x, bot.pos.y, bot.pos.z);
-    const hitboxes = buildPlayerHitboxes(base, bot.yaw);
+  for (let i = 0; i < game.bots.length; i++) {
+    const bot = game.bots[i];
+    if (!bot || !bot.alive) continue;
+    if (bot.team === game.team) continue;
 
-    // Early exit: check if bot is even in range before testing hitboxes
-    const distToBot = v3len(v3sub(roAim, base));
-    if (distToBot > 90) {
-      collisionPerf.earlyExits++;
-      continue;
-    }
-
-    for (const hb of hitboxes) {
-      collisionPerf.narrowPhaseTests++;
-      const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
-      if (t === null) continue;
-      if (t > 0 && t < bestT) {
-        bestT = t;
-        bestTarget = bot;
-        bestZone = hb.zone;
-        bestMult = hb.mult;
-      }
-    }
+    const basePos = v3(bot.pos.x, bot.pos.y, bot.pos.z);
+    const entry = {
+      id: `bot:${i}`,
+      type: 'bot',
+      bot,
+      basePos,
+      position: basePos,
+      yaw: safeNumber(bot.yaw, 0),
+    };
+    const broadAabb2 = aabb3To2(playerBroadPhaseAabb(basePos));
+    targetTree.insert(entry, broadAabb2);
   }
 
-  // 多人模式：精确碰撞检测（多区域命中判定）
   if (game.mode === 'online') {
-    collisionPerf.rayCasts++;
-    const playerCandidates = [];
-
-    // Broad phase: collect valid targets
     for (const [playerId, playerData] of otherPlayers) {
       if (!playerData || playerData.deathHidden) continue;
       const hp = readSyncedHp(playerData, 100);
       if (playerData.alive === false || hp <= 0) continue;
-      if (playerData.team === game.team) continue; // 不攻击队友
+      if (playerData.team === game.team) continue;
       if (!playerData.position) continue;
 
-      // Early exit: skip players too far away
-      const pos = playerData.position;
-      const dist = Math.hypot(pos.x - roAim.x, pos.y - roAim.y, pos.z - roAim.z);
-      if (dist > 90) {
-        collisionPerf.earlyExits++;
-        continue;
-      }
-
-      playerCandidates.push({ playerId, playerData });
-    }
-    collisionPerf.broadPhaseCandidates += playerCandidates.length;
-
-    // Narrow phase: test multi-zone hitboxes
-    for (const { playerId, playerData } of playerCandidates) {
       const pos = playerData.position;
       const basePos = v3(pos.x, pos.y, pos.z);
-      const yaw = playerData.yaw || 0;
+      const entry = {
+        id: `player:${playerId}`,
+        type: 'player',
+        playerId,
+        playerData,
+        basePos,
+        position: pos,
+        yaw: safeNumber(playerData.yaw, 0),
+      };
+      const broadAabb2 = aabb3To2(playerBroadPhaseAabb(basePos));
+      targetTree.insert(entry, broadAabb2);
+    }
+  }
 
-      // Use same multi-zone hitbox system as AI bots
-      const hitboxes = buildPlayerHitboxes(basePos, yaw);
+  const broadCandidates = targetTree.query(queryAabb);
+  collisionPerf.broadPhaseCandidates += broadCandidates.length;
 
-      for (const hb of hitboxes) {
-        collisionPerf.narrowPhaseTests++;
-        const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
+  for (const candidate of broadCandidates) {
+    const distToTarget = v3len(v3sub(roAim, candidate.basePos));
+    if (distToTarget > 95) {
+      collisionPerf.earlyExits++;
+      continue;
+    }
 
-        if (t !== null && t > 0 && t < bestT) {
-          bestT = t;
-          bestTarget = { type: 'player', playerId, playerData, position: playerData.position };
-          bestZone = hb.zone;
-          bestMult = hb.mult;
+    const hitboxes = buildPlayerHitboxes(candidate.basePos, candidate.yaw);
+    for (const hb of hitboxes) {
+      collisionPerf.narrowPhaseTests++;
+      const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
+      if (t === null || t <= 0 || t >= bestT) continue;
 
-          // Early exit optimization: if we hit head, skip remaining zones for this player
-          // (head is checked first due to priority in buildPlayerHitboxes)
-          if (hb.zone === 'head') {
-            collisionPerf.earlyExits++;
-            break;
-          }
-        }
+      bestT = t;
+      bestTarget = candidate;
+      bestZone = hb.zone;
+      bestMult = hb.mult;
+
+      // 命中头部后跳过该目标剩余 hitbox。
+      if (hb.zone === 'head') {
+        collisionPerf.earlyExits++;
+        break;
       }
     }
   }
 
   if (bestTarget) {
     // 距离衰减伤害计算
-    const targetPos = bestTarget.pos || bestTarget.position || (bestTarget.playerData && bestTarget.playerData.position);
+    const targetPos = bestTarget.position || bestTarget.basePos || bestTarget.pos;
     const distance = targetPos ? v3len(v3sub(roAim, targetPos)) : 0;
     const maxRange = 80; // 最大有效射程
     const falloffStart = 20; // 开始衰减的距离
@@ -4936,6 +5016,9 @@ function updateWeapon(dt) {
 
     const dmg = Math.floor(w.def.damage * bestMult * falloffMult);
 
+    const isHeadshot = bestZone === 'head';
+    const zoneFx = getHitZoneFeedback(bestZone);
+
     // 多人模式：发送伤害事件到服务器
     if (bestTarget.type === 'player') {
       const weaponType = w && w.def ? w.def.id : 'unknown';
@@ -4943,31 +5026,36 @@ function updateWeapon(dt) {
       const normalizedZone = bestZone === 'torso' ? 'body' : bestZone;
       multiplayer.sendHit(bestTarget.playerId, dmg, weaponType, {
         hitZone: normalizedZone || 'body',
-        headshot: bestZone === 'head'
+        headshot: isHeadshot
       });
       audio.hit();
       game.lastStatusAt = nowMs();
       game.hitmarker.t = 0.12;
-      game.hitmarker.head = bestZone === 'head';
-      spawnDamageNumberForPlayer(bestTarget.playerId, dmg, { crit: bestZone === 'head' });
-      const zoneLabel = bestZone === 'head' ? 'HEADSHOT' : (bestZone || 'body').toUpperCase();
-      setStatus(`Hit ${bestTarget.playerData.name} [${zoneLabel}]: -${dmg}`, false);
+      game.hitmarker.head = isHeadshot;
+      spawnDamageNumberForPlayer(bestTarget.playerId, dmg, { crit: isHeadshot, color: zoneFx.color });
+      const targetName = (bestTarget.playerData && bestTarget.playerData.name) || 'Player';
+      setStatus(`Hit ${targetName} [${zoneFx.label}]: -${dmg}`, false);
     } else {
       // AI 模式：本地处理bot伤害
-      bestTarget.hp -= dmg;
-      audio.hit();
-      game.lastStatusAt = nowMs();
-      game.hitmarker.t = 0.12;
-      game.hitmarker.head = bestZone === 'head';
-      if (bestTarget.hp <= 0) {
-        bestTarget.alive = false;
-        bestTarget.respawnAt = nowMs() + 2500;
-        setStatus('Bot down', false);
-        game.stats.kills += 1;
-        if (bestTarget.team !== game.team) addMoney(game.econ.rewardKill);
+      const bot = bestTarget.bot;
+      if (!bot) {
+        setStatus('Miss', false);
       } else {
-        const z = bestZone ? ` [${bestZone.toUpperCase()}]` : '';
-        setStatus(`Hit${z}: -${dmg}`, false);
+        bot.hp -= dmg;
+        audio.hit();
+        game.lastStatusAt = nowMs();
+        game.hitmarker.t = 0.12;
+        game.hitmarker.head = isHeadshot;
+        spawnDamageNumber(v3(bot.pos.x, bot.pos.y, bot.pos.z), dmg, { crit: isHeadshot, color: zoneFx.color });
+        if (bot.hp <= 0) {
+          bot.alive = false;
+          bot.respawnAt = nowMs() + 2500;
+          setStatus('Bot down', false);
+          game.stats.kills += 1;
+          if (bot.team !== game.team) addMoney(game.econ.rewardKill);
+        } else {
+          setStatus(`Hit [${zoneFx.label}]: -${dmg}`, false);
+        }
       }
     }
   } else {
@@ -5786,9 +5874,18 @@ function drawWorld() {
   
   mat4Perspective(proj, (fovDeg * Math.PI) / 180, aspect, 0.05, 120);
 
-  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
-  const fwd = forwardFromYawPitch(game.yaw, game.pitch);
-  const camTarget = v3add(camPos, fwd);
+  // 观战模式摄像机
+  let camPos, fwd, camTarget;
+  if (spectatorManager.isEnabled()) {
+    const spectatorCam = spectatorManager.update(0, game.keys, game.mouseDX, game.mouseDY);
+    camPos = v3(spectatorCam.pos.x, spectatorCam.pos.y, spectatorCam.pos.z);
+    fwd = forwardFromYawPitch(spectatorCam.yaw, spectatorCam.pitch);
+    camTarget = v3add(camPos, fwd);
+  } else {
+    camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+    fwd = forwardFromYawPitch(game.yaw, game.pitch);
+    camTarget = v3add(camPos, fwd);
+  }
   mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
 
   const tSky = nowMs() * 0.00005;
@@ -6005,6 +6102,61 @@ function drawWorld() {
         removeHealthBar(playerId)
       }
     }
+  }
+
+  // 观战模式下不渲染玩家武器（除非是第一人称模式）
+  if (spectatorManager.isEnabled() && spectatorManager.getMode() !== SPECTATOR_MODE.FIRST_PERSON) {
+    // 跳过武器渲染，继续渲染其他元素
+    const w = game.getWeapon();
+    const kick = w.kick;
+    const worldUp = v3(0, 1, 0);
+    const camRight = v3norm(v3cross(worldUp, fwd));
+    const camUp = v3norm(v3cross(fwd, camRight));
+
+    // 继续渲染弹壳和曳光弹
+    for (const s of game.shells) {
+      const c = v3(0.65, 0.55, 0.2);
+      drawBox(s.pos, v3(0.06, 0.04, 0.1), c);
+    }
+
+    for (const t of game.tracers) {
+      const k = clamp01(t.life / 0.32);
+      const hue = t.hue || 0.55;
+      const baseCol =
+        hue < 0.1
+          ? v3(1.0 * k, 0.28 + 0.28 * k, 0.24)
+          : v3(0.28 + 0.72 * k, 0.92 * k, 1.0 * k);
+
+      const travel = clamp01(t.travel || 0);
+      const segLen = 1.4;
+      const dir = v3sub(t.b, t.a);
+      const L = v3len(dir);
+      if (L > 0.001) {
+        const f = v3scale(dir, 1 / L);
+        const tip = v3add(t.a, v3scale(f, L * travel));
+        const tail = v3add(tip, v3scale(f, -Math.min(segLen, L * travel)));
+        drawTracer(tail, tip, baseCol);
+
+        if ((t.hue || 0.55) >= 0.1) {
+          gl.disable(gl.CULL_FACE);
+          gl.disable(gl.DEPTH_TEST);
+          const glow = v3(baseCol.x * 0.6, baseCol.y * 0.6, baseCol.z * 0.6);
+          drawOrientedBox(
+            v3scale(v3add(tail, tip), 0.5),
+            v3norm(v3cross(v3(0, 1, 0), f)),
+            v3norm(v3cross(f, v3norm(v3cross(v3(0, 1, 0), f)))),
+            f,
+            v3(0.02, 0.02, Math.min(segLen, v3len(v3sub(tip, tail))) * 1.1),
+            glow
+          );
+          gl.enable(gl.DEPTH_TEST);
+          gl.enable(gl.CULL_FACE);
+        }
+      }
+    }
+
+    gl.bindVertexArray(null);
+    return;
   }
 
   const w = game.getWeapon();
@@ -6492,6 +6644,25 @@ function frame() {
   const aiRunning = game.mode === 'ai' && game.uiScreen === 'ai' && !game.ending;
 
   updateSmoke(dt);
+
+  // 观战模式更新
+  if (spectatorManager.isEnabled()) {
+    // 更新观战UI
+    const deathInfo = spectatorManager.getDeathInfo();
+    if (deathInfo) {
+      if (deathInfo.startDelay) {
+        spectatorUI.showDeathOverlay(deathInfo);
+      } else {
+        spectatorUI.hideDeathOverlay();
+        const targetInfo = spectatorManager.getTargetInfo();
+        spectatorUI.updateTargetInfo(targetInfo);
+        spectatorUI.updateModeIndicator(
+          spectatorManager.getMode(),
+          targetInfo?.name || null
+        );
+      }
+    }
+  }
 
   if (game.pointerLocked) {
     updatePlayer(dt);
