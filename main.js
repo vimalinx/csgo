@@ -10,6 +10,10 @@ import {
   removeHealthBar,
   updateWaitingPlayerList
 } from './multiplayer-ui.js'
+// Radar system import
+import Radar from './radar.js'
+// Spectator mode import
+import { SPECTATOR_MODE, SpectatorManager, SpectatorUI } from './spectator-mode.js'
 
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
@@ -300,6 +304,134 @@ function aabbFromCenter(p, half) {
     min: v3(p.x - half.x, p.y - half.y, p.z - half.z),
     max: v3(p.x + half.x, p.y + half.y, p.z + half.z),
   };
+}
+
+// ============================================================================
+// Spatial Grid for Collision Optimization (60 FPS Target)
+// ============================================================================
+class SpatialGrid {
+  constructor(cellSize = 16, worldMin = -100, worldMax = 100) {
+    this.cellSize = cellSize;
+    this.worldMin = worldMin;
+    this.worldMax = worldMax;
+    this.gridSize = Math.ceil((worldMax - worldMin) / cellSize);
+    this.cells = new Map();
+  }
+
+  clear() {
+    this.cells.clear();
+  }
+
+  _cellKey(cx, cy, cz) {
+    return `${cx},${cy},${cz}`;
+  }
+
+  _toCellCoord(x, y, z) {
+    return {
+      cx: Math.floor((x - this.worldMin) / this.cellSize),
+      cy: Math.floor((y - this.worldMin) / this.cellSize),
+      cz: Math.floor((z - this.worldMin) / this.cellSize)
+    };
+  }
+
+  // Insert entity into all cells its AABB overlaps
+  insert(entity, aabb) {
+    const minC = this._toCellCoord(aabb.min.x, aabb.min.y, aabb.min.z);
+    const maxC = this._toCellCoord(aabb.max.x, aabb.max.y, aabb.max.z);
+
+    for (let cx = minC.cx; cx <= maxC.cx; cx++) {
+      for (let cy = minC.cy; cy <= maxC.cy; cy++) {
+        for (let cz = minC.cz; cz <= maxC.cz; cz++) {
+          const key = this._cellKey(cx, cy, cz);
+          if (!this.cells.has(key)) {
+            this.cells.set(key, []);
+          }
+          this.cells.get(key).push(entity);
+        }
+      }
+    }
+  }
+
+  // Get potential candidates near a ray (for broad phase culling)
+  getRayCandidates(ro, rd, maxDist = 80) {
+    const candidates = new Set();
+    const steps = 20;
+    const stepSize = maxDist / steps;
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i * stepSize;
+      const px = ro.x + rd.x * t;
+      const py = ro.y + rd.y * t;
+      const pz = ro.z + rd.z * t;
+
+      const { cx, cy, cz } = this._toCellCoord(px, py, pz);
+
+      // Check 3x3x3 neighborhood at each step
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const key = this._cellKey(cx + dx, cy + dy, cz + dz);
+            const cell = this.cells.get(key);
+            if (cell) {
+              for (const e of cell) candidates.add(e);
+            }
+          }
+        }
+      }
+    }
+    return Array.from(candidates);
+  }
+}
+
+// Global spatial grid instance
+let entityGrid = new SpatialGrid(16, -100, 100);
+
+// Performance monitoring for collision detection
+const collisionPerf = {
+  frameTime: 0,
+  rayCasts: 0,
+  broadPhaseCandidates: 0,
+  narrowPhaseTests: 0,
+  earlyExits: 0
+};
+
+function resetCollisionPerf() {
+  collisionPerf.rayCasts = 0;
+  collisionPerf.broadPhaseCandidates = 0;
+  collisionPerf.narrowPhaseTests = 0;
+  collisionPerf.earlyExits = 0;
+}
+
+// Hitzone configuration (CS:GO standard damage multipliers)
+const HITZONE_CONFIG = {
+  head: { mult: 4.0, priority: 1 },
+  torso: { mult: 1.0, priority: 2 },
+  legs: { mult: 0.75, priority: 3 }
+};
+
+// Build player hitboxes (7 zones: head, upper torso, lower torso, 2 arms, 2 legs)
+function buildPlayerHitboxes(basePos, yaw = 0) {
+  const up = v3(0, 1, 0);
+  const f = v3norm(forwardFromYawPitch(yaw, 0));
+  const r = v3norm(v3cross(up, f));
+  const u = up;
+  const hip = v3add(basePos, v3(0, 0.95, 0));
+
+  // Priority order: head first (early exit for headshots)
+  return [
+    // Head (smallest, highest damage)
+    { zone: 'head', mult: HITZONE_CONFIG.head.mult, c: v3add(hip, v3(0, 1.18, 0.02)), h: v3(0.16, 0.16, 0.16), r, u, f },
+    // Upper torso (chest)
+    { zone: 'torso', mult: HITZONE_CONFIG.torso.mult, c: v3add(hip, v3(0, 0.78, 0.02)), h: v3(0.25, 0.22, 0.16), r, u, f },
+    // Lower torso (stomach)
+    { zone: 'torso', mult: HITZONE_CONFIG.torso.mult, c: v3add(hip, v3(0, 0.25, 0)), h: v3(0.28, 0.38, 0.15), r, u, f },
+    // Arms (low priority)
+    { zone: 'torso', mult: 0.75, c: v3add(hip, v3(0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09), r, u, f },
+    { zone: 'torso', mult: 0.75, c: v3add(hip, v3(-0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09), r, u, f },
+    // Legs
+    { zone: 'legs', mult: HITZONE_CONFIG.legs.mult, c: v3add(basePos, v3(0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11), r, u, f },
+    { zone: 'legs', mult: HITZONE_CONFIG.legs.mult, c: v3add(basePos, v3(-0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11), r, u, f },
+  ];
 }
 
 function aabbIntersects(a, b) {
@@ -695,6 +827,568 @@ function makeBot(id, pos) {
 
 const DEFAULT_SPEED = 6.0;
 
+// ==================== 投掷物系统 ====================
+
+/**
+ * 投掷物基类（抛物线轨迹）
+ */
+class Grenade {
+  constructor(pos, vel, type) {
+    this.pos = v3(pos.x, pos.y, pos.z);
+    this.vel = v3(vel.x, vel.y, vel.z);
+    this.type = type; // 'flash' | 'smoke' | 'molotov'
+    this.alive = true;
+    this.bounces = 0;
+    this.maxBounces = 3;
+    this.life = 3.0; // 最大飞行时间
+  }
+
+  update(dt, colliders) {
+    if (!this.alive) return;
+
+    // 重力
+    this.vel.y -= 12.0 * dt;
+
+    // 空气阻力
+    this.vel.x *= 0.995;
+    this.vel.z *= 0.995;
+
+    // 计算新位置
+    const newPos = v3add(this.pos, v3scale(this.vel, dt));
+
+    // 碰撞检测
+    const half = v3(0.1, 0.1, 0.1);
+    const aabb = aabbFromCenter(newPos, half);
+
+    for (const c of colliders) {
+      if (aabbIntersects(aabb, c)) {
+        // 反弹
+        this.bounces++;
+
+        if (this.bounces >= this.maxBounces) {
+          this.alive = false;
+          return;
+        }
+
+        // 简单反弹（反转速度分量并减速）
+        if (Math.abs(this.vel.y) > 0.1) {
+          this.vel.y = -this.vel.y * 0.4;
+          newPos.y = this.pos.y;
+        }
+        if (Math.abs(this.vel.x) > 0.1) {
+          this.vel.x = -this.vel.x * 0.4;
+        }
+        if (Math.abs(this.vel.z) > 0.1) {
+          this.vel.z = -this.vel.z * 0.4;
+        }
+
+        break;
+      }
+    }
+
+    // 地面检测
+    if (newPos.y <= 0.1) {
+      newPos.y = 0.1;
+      this.vel.y = -this.vel.y * 0.3;
+      this.vel.x *= 0.7;
+      this.vel.z *= 0.7;
+      this.bounces++;
+
+      if (this.bounces >= this.maxBounces || v3len(this.vel) < 0.5) {
+        this.alive = false;
+      }
+    }
+
+    this.pos = newPos;
+
+    // 生命周期
+    this.life -= dt;
+    if (this.life <= 0) {
+      this.alive = false;
+    }
+  }
+}
+
+/**
+ * 烟雾粒子系统
+ */
+class SmokeParticleSystem {
+  constructor(pos, duration) {
+    this.pos = v3(pos.x, pos.y + 0.5, pos.z);
+    this.particles = [];
+    this.duration = duration;
+    this.timer = 0;
+    this.alive = true;
+    this.radius = 4.0;
+    this.height = 2.5;
+    this.particleCount = 200;
+
+    this.initParticles();
+  }
+
+  initParticles() {
+    for (let i = 0; i < this.particleCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * this.radius;
+      const x = this.pos.x + Math.cos(angle) * r;
+      const z = this.pos.z + Math.sin(angle) * r;
+      const y = this.pos.y + Math.random() * this.height;
+
+      this.particles.push({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.1,
+        vz: (Math.random() - 0.5) * 0.3,
+        size: 0.3 + Math.random() * 0.4,
+        opacity: 0.3 + Math.random() * 0.4,
+        life: 1.0,
+      });
+    }
+  }
+
+  update(dt) {
+    this.timer += dt;
+
+    if (this.timer >= this.duration) {
+      this.alive = false;
+      return;
+    }
+
+    // 淡出效果
+    const fadeStart = this.duration - 2.0;
+    const fadeMultiplier = this.timer > fadeStart 
+      ? Math.max(0, (this.duration - this.timer) / 2.0) 
+      : 1.0;
+
+    for (const p of this.particles) {
+      // 漂浮运动
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+
+      // 边界约束
+      const dx = p.x - this.pos.x;
+      const dz = p.z - this.pos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > this.radius) {
+        p.x = this.pos.x + (dx / dist) * this.radius;
+        p.z = this.pos.z + (dz / dist) * this.radius;
+        p.vx *= -0.5;
+        p.vz *= -0.5;
+      }
+
+      // 高度约束
+      if (p.y < this.pos.y) p.y = this.pos.y;
+      if (p.y > this.pos.y + this.height) p.y = this.pos.y + this.height;
+
+      // 随机扰动
+      p.vx += (Math.random() - 0.5) * 0.1;
+      p.vy += (Math.random() - 0.5) * 0.05;
+      p.vz += (Math.random() - 0.5) * 0.1;
+
+      p.opacity = (0.3 + Math.random() * 0.4) * fadeMultiplier;
+    }
+  }
+
+  getAABB() {
+    const halfX = this.radius;
+    const halfY = this.height / 2;
+    const halfZ = this.radius;
+    const center = v3(this.pos.x, this.pos.y + halfY, this.pos.z);
+    return aabbFromCenter(center, v3(halfX, halfY, halfZ));
+  }
+
+  containsPoint(point) {
+    const dx = point.x - this.pos.x;
+    const dz = point.z - this.pos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    return dist < this.radius && point.y >= this.pos.y && point.y <= this.pos.y + this.height;
+  }
+}
+
+/**
+ * 火焰粒子系统（燃烧弹）
+ */
+class FireParticleSystem {
+  constructor(pos, duration, damagePerSecond) {
+    this.pos = v3(pos.x, pos.y + 0.1, pos.z);
+    this.particles = [];
+    this.duration = duration;
+    this.timer = 0;
+    this.alive = true;
+    this.radius = 3.0;
+    this.height = 1.5;
+    this.damagePerSecond = damagePerSecond;
+    this.damageTimer = 0;
+    this.particleCount = 150;
+
+    this.initParticles();
+  }
+
+  initParticles() {
+    for (let i = 0; i < this.particleCount; i++) {
+      this.addParticle();
+    }
+  }
+
+  addParticle() {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * this.radius;
+    const x = this.pos.x + Math.cos(angle) * r;
+    const z = this.pos.z + Math.sin(angle) * r;
+    const y = this.pos.y;
+
+    this.particles.push({
+      x, y, z,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: 0.8 + Math.random() * 0.5,
+      vz: (Math.random() - 0.5) * 0.5,
+      size: 0.2 + Math.random() * 0.3,
+      life: 0.5 + Math.random() * 0.5,
+      maxLife: 0.5 + Math.random() * 0.5,
+      hue: Math.random(), // 0=红, 0.15=橙, 0.33=黄
+    });
+  }
+
+  update(dt) {
+    this.timer += dt;
+    this.damageTimer += dt;
+
+    if (this.timer >= this.duration) {
+      this.alive = false;
+      return;
+    }
+
+    // 更新粒子
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      p.life -= dt;
+      p.vy += 0.5 * dt; // 上升加速
+
+      if (p.life <= 0 || p.y > this.pos.y + this.height) {
+        this.particles.splice(i, 1);
+      }
+    }
+
+    // 持续添加新粒子
+    const spawnRate = 50 * (1 - this.timer / this.duration);
+    if (Math.random() < spawnRate * dt) {
+      this.addParticle();
+    }
+  }
+
+  getAABB() {
+    const halfX = this.radius;
+    const halfY = this.height / 2;
+    const halfZ = this.radius;
+    const center = v3(this.pos.x, this.pos.y + halfY, this.pos.z);
+    return aabbFromCenter(center, v3(halfX, halfY, halfZ));
+  }
+
+  containsPoint(point) {
+    const dx = point.x - this.pos.x;
+    const dz = point.z - this.pos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    return dist < this.radius && point.y >= this.pos.y - 0.5 && point.y <= this.pos.y + this.height;
+  }
+
+  shouldDamage() {
+    if (this.damageTimer >= 0.1) {
+      this.damageTimer = 0;
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * 投掷物管理器
+ */
+class GrenadeManager {
+  constructor() {
+    this.flyingGrenades = []; // 飞行中的投掷物
+    this.smokeSystems = [];   // 烟雾粒子系统
+    this.fireSystems = [];    // 火焰粒子系统
+  }
+
+  throwGrenade(pos, dir, type) {
+    const speed = type === 'molotov' ? 10 : 12;
+    const vel = v3scale(v3norm(dir), speed);
+    vel.y += 3; // 初始向上速度
+    
+    const grenade = new Grenade(pos, vel, type);
+    this.flyingGrenades.push(grenade);
+    return grenade;
+  }
+
+  update(dt, colliders, game) {
+    // 更新飞行中的投掷物
+    for (let i = this.flyingGrenades.length - 1; i >= 0; i--) {
+      const g = this.flyingGrenades[i];
+      g.update(dt, colliders);
+
+      if (!g.alive) {
+        // 投掷物落地，触发效果
+        this.onGrenadeLanded(g, game);
+        this.flyingGrenades.splice(i, 1);
+      }
+    }
+
+    // 更新烟雾系统
+    for (let i = this.smokeSystems.length - 1; i >= 0; i--) {
+      const smoke = this.smokeSystems[i];
+      smoke.update(dt);
+      if (!smoke.alive) {
+        this.smokeSystems.splice(i, 1);
+      }
+    }
+
+    // 更新火焰系统
+    for (let i = this.fireSystems.length - 1; i >= 0; i--) {
+      const fire = this.fireSystems[i];
+      fire.update(dt);
+
+      // 火焰伤害
+      if (fire.shouldDamage()) {
+        this.applyFireDamage(fire, game);
+      }
+
+      if (!fire.alive) {
+        this.fireSystems.splice(i, 1);
+      }
+    }
+  }
+
+  onGrenadeLanded(grenade, game) {
+    const pos = grenade.pos;
+
+    switch (grenade.type) {
+      case 'flash':
+        this.triggerFlashbang(pos, game);
+        break;
+      case 'smoke':
+        this.triggerSmoke(pos, game);
+        break;
+      case 'molotov':
+        this.triggerMolotov(pos, game);
+        break;
+    }
+  }
+
+  triggerFlashbang(pos, game) {
+    const burstRadius = 14;
+    const tNow = nowMs();
+
+    // 影响敌人
+    for (const b of game.bots) {
+      if (!b.alive || b.team === game.team) continue;
+      
+      const eye = v3(b.pos.x, b.pos.y + 1.4, b.pos.z);
+      const diff = v3sub(eye, pos);
+      const dist = v3len(diff);
+      
+      if (dist <= 0.001 || dist > burstRadius) continue;
+      
+      b.nextThinkAt = Math.max(b.nextThinkAt, tNow + 2500);
+      b.shootCooldown = Math.max(b.shootCooldown, 2.8);
+    }
+
+    // 玩家致盲效果
+    const playerEye = v3(game.pos.x, game.pos.y + 1.6, game.pos.z);
+    const playerDist = v3len(v3sub(playerEye, pos));
+    
+    if (playerDist <= burstRadius) {
+      const intensity = 1 - (playerDist / burstRadius);
+      game.flashEffect.active = true;
+      game.flashEffect.intensity = Math.min(1, intensity + 0.3);
+      game.flashEffect.timer = game.flashEffect.duration;
+    }
+
+    audio.blip(800, 0.1, 2);
+    setStatus(`闪光弹爆炸`, false);
+  }
+
+  triggerSmoke(pos, game) {
+    const smoke = new SmokeParticleSystem(pos, game.grenades.smoke.duration);
+    this.smokeSystems.push(smoke);
+    
+    // 添加到游戏碰撞系统
+    game.grenades.smoke.active.push({
+      pos: v3(pos.x, pos.y + 1.0, pos.z),
+      scale: v3(8, 2.5, 8),
+      aabb: smoke.getAABB(),
+      system: smoke,
+      expiresAt: nowMs() + game.grenades.smoke.duration * 1000,
+    });
+
+    rebuildGameplayColliders();
+    setStatus(`烟雾弹部署`, false);
+  }
+
+  triggerMolotov(pos, game) {
+    const fire = new FireParticleSystem(
+      pos, 
+      game.grenades.molotov.duration,
+      game.grenades.molotov.damagePerSecond
+    );
+    this.fireSystems.push(fire);
+
+    game.grenades.molotov.active.push({
+      pos: v3(pos.x, pos.y, pos.z),
+      scale: v3(6, 1.5, 6),
+      aabb: fire.getAABB(),
+      system: fire,
+      expiresAt: nowMs() + game.grenades.molotov.duration * 1000,
+    });
+
+    audio.blip(200, 0.2, 0);
+    setStatus(`燃烧弹点燃`, false);
+  }
+
+  applyFireDamage(fire, game) {
+    const damage = fire.damagePerSecond * 0.1; // 每0.1秒的伤害
+
+    // 伤害玩家
+    if (game.playerAlive) {
+      const playerPos = v3(game.pos.x, game.pos.y + 0.5, game.pos.z);
+      if (fire.containsPoint(playerPos)) {
+        game.hp = Math.max(0, game.hp - damage);
+        if (game.hp <= 0) {
+          game.playerAlive = false;
+          game.stats.deaths += 1;
+          setStatus('你被火焰烧死了', true);
+        }
+      }
+    }
+
+    // 伤害机器人
+    for (const b of game.bots) {
+      if (!b.alive) continue;
+      
+      const botPos = v3(b.pos.x, b.pos.y + 0.5, b.pos.z);
+      if (fire.containsPoint(botPos)) {
+        b.hp -= damage;
+        if (b.hp <= 0) {
+          b.alive = false;
+          b.respawnAt = nowMs() + 2500;
+          if (b.team !== game.team) {
+            game.stats.kills += 1;
+            addMoney(game.econ.rewardKill);
+          }
+        }
+      }
+    }
+  }
+
+  render(ctx, canvasWidth, canvasHeight, game) {
+    // 渲染飞行中的投掷物（3D -> 2D 投影）
+    for (const g of this.flyingGrenades) {
+      const screenPos = this.worldToScreen(g.pos, game);
+      if (screenPos) {
+        const size = 8;
+        ctx.fillStyle = g.type === 'flash' ? '#FFFF00' 
+                      : g.type === 'smoke' ? '#666666' 
+                      : '#FF4400';
+        ctx.beginPath();
+        ctx.arc(screenPos.x, screenPos.y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 渲染烟雾粒子
+    for (const smoke of this.smokeSystems) {
+      for (const p of smoke.particles) {
+        const screenPos = this.worldToScreen(v3(p.x, p.y, p.z), game);
+        if (screenPos) {
+          const size = p.size * 30;
+          ctx.fillStyle = `rgba(128, 128, 128, ${p.opacity})`;
+          ctx.beginPath();
+          ctx.arc(screenPos.x, screenPos.y, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // 渲染火焰粒子
+    for (const fire of this.fireSystems) {
+      for (const p of fire.particles) {
+        const screenPos = this.worldToScreen(v3(p.x, p.y, p.z), game);
+        if (screenPos) {
+          const lifeRatio = p.life / p.maxLife;
+          const size = p.size * 25 * lifeRatio;
+          
+          // 火焰颜色渐变（红->橙->黄）
+          let r, g, b;
+          if (lifeRatio > 0.7) {
+            r = 255;
+            g = Math.floor(100 + 155 * (1 - lifeRatio) / 0.3);
+            b = 0;
+          } else if (lifeRatio > 0.3) {
+            r = 255;
+            g = Math.floor(50 + 50 * (lifeRatio - 0.3) / 0.4);
+            b = 0;
+          } else {
+            r = Math.floor(255 * lifeRatio / 0.3);
+            g = 0;
+            b = 0;
+          }
+          
+          const opacity = lifeRatio * 0.8;
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+          ctx.beginPath();
+          ctx.arc(screenPos.x, screenPos.y, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  worldToScreen(worldPos, game) {
+    try {
+      const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+      const fwd = forwardFromYawPitch(game.yaw, game.pitch);
+      const camTarget = v3add(camPos, fwd);
+
+      const view = mat4Identity();
+      mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
+
+      const aspect = glsys.width / Math.max(1, glsys.height);
+      const proj = mat4Identity();
+      const fovDeg = 70 / (game.scope.active ? game.scope.zoomLevel : 1);
+      mat4Perspective(proj, (fovDeg * Math.PI) / 180, aspect, 0.05, 120);
+
+      const viewPos = mat4TransformPoint(view, worldPos);
+      if (viewPos.z > -0.05) return null;
+
+      const clipPos = mat4TransformPoint(proj, viewPos);
+      const screenX = (clipPos.x + 1) / 2 * canvas.width;
+      const screenY = (1 - clipPos.y) / 2 * canvas.height;
+
+      if (screenX < -100 || screenX > canvas.width + 100 || 
+          screenY < -100 || screenY > canvas.height + 100) {
+        return null;
+      }
+
+      return { x: screenX, y: screenY };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  clear() {
+    this.flyingGrenades = [];
+    this.smokeSystems = [];
+    this.fireSystems = [];
+  }
+}
+
+// 全局投掷物管理器
+const grenadeManager = new GrenadeManager();
+
 const WEAPON_DEFS = [
   {
     id: 'knife',
@@ -1066,26 +1760,54 @@ class Game {
       ct: [v3(-23, 0, -17), v3(-16, 0, -17), v3(-9, 0, -17), v3(-1, 0, -17), v3(8, 0, -17), v3(17, 0, -17), v3(-21, 0, -8), v3(-13, 0, -8), v3(-5, 0, -8), v3(3, 0, -8), v3(11, 0, -8), v3(18, 0, -8), v3(-19, 0, 4), v3(-11, 0, 4), v3(-3, 0, 4), v3(5, 0, 4), v3(12, 0, 4), v3(19, 0, 4), v3(-18, 0, 14), v3(-10, 0, 14), v3(-2, 0, 14), v3(6, 0, 14), v3(14, 0, 14), v3(21, 0, 14)],
       t: [v3(23, 0, 17), v3(16, 0, 17), v3(9, 0, 17), v3(1, 0, 17), v3(-8, 0, 17), v3(-17, 0, 17), v3(21, 0, 8), v3(13, 0, 8), v3(5, 0, 8), v3(-3, 0, 8), v3(-11, 0, 8), v3(-18, 0, 8), v3(19, 0, -4), v3(11, 0, -4), v3(3, 0, -4), v3(-5, 0, -4), v3(-12, 0, -4), v3(-19, 0, -4), v3(18, 0, -14), v3(10, 0, -14), v3(2, 0, -14), v3(-6, 0, -14), v3(-14, 0, -14), v3(-21, 0, -14)],
     };
-    this.smoke = {
-      cooldown: 0,
-      cooldownTotal: 16,
-      duration: 8,
-      charges: 0,
-      maxCharges: 2,
-      active: [],
-      chokePoints: [
-        { id: 'upperMid', pos: v3(2, 0.9, -10), scale: v3(3.0, 1.8, 3.4) },
-        { id: 'midCross', pos: v3(2, 0.9, 0), scale: v3(3.0, 1.8, 3.4) },
-        { id: 'lowerMid', pos: v3(2, 0.9, 10), scale: v3(3.0, 1.8, 3.4) },
-        { id: 'AEntry', pos: v3(12, 0.9, -14), scale: v3(3.0, 1.8, 3.4) },
-        { id: 'BEntry', pos: v3(12, 0.9, 14), scale: v3(3.0, 1.8, 3.4) },
-      ],
+    // 投掷物系统
+    this.grenades = {
+      // 闪光弹
+      flash: {
+        cooldown: 0,
+        cooldownTotal: 14,
+        charges: 0,
+        maxCharges: 2,
+        active: [], // 飞行中的闪光弹
+      },
+      // 烟雾弹
+      smoke: {
+        cooldown: 0,
+        cooldownTotal: 16,
+        duration: 15, // 15秒持续时间
+        charges: 0,
+        maxCharges: 2,
+        active: [], // 已部署的烟雾
+        flying: [], // 飞行中的烟雾弹
+        chokePoints: [
+          { id: 'upperMid', pos: v3(2, 0.9, -10), scale: v3(3.0, 1.8, 3.4) },
+          { id: 'midCross', pos: v3(2, 0.9, 0), scale: v3(3.0, 1.8, 3.4) },
+          { id: 'lowerMid', pos: v3(2, 0.9, 10), scale: v3(3.0, 1.8, 3.4) },
+          { id: 'AEntry', pos: v3(12, 0.9, -14), scale: v3(3.0, 1.8, 3.4) },
+          { id: 'BEntry', pos: v3(12, 0.9, 14), scale: v3(3.0, 1.8, 3.4) },
+        ],
+      },
+      // 燃烧弹
+      molotov: {
+        cooldown: 0,
+        cooldownTotal: 18,
+        duration: 7, // 7秒持续时间
+        damagePerSecond: 8, // 每秒伤害
+        charges: 0,
+        maxCharges: 1,
+        active: [], // 已部署的火焰区域
+        flying: [], // 飞行中的燃烧弹
+      },
     };
-    this.flashbang = {
-      cooldown: 0,
-      cooldownTotal: 14,
-      charges: 0,
-      maxCharges: 2,
+    // 兼容旧代码的别名
+    this.smoke = this.grenades.smoke;
+    this.flashbang = this.grenades.flash;
+    // 闪光效果状态
+    this.flashEffect = {
+      active: false,
+      intensity: 0,
+      duration: 2.5, // 致盲持续时间
+      timer: 0,
     };
     this.round = {
       state: 'idle',
@@ -1307,132 +2029,43 @@ class Game {
   }
 }
 
-class Minimap {
-  constructor(host, gameState) {
-    this.game = gameState;
-    this.host = host;
-    this.size = 200;
-    this.pad = 12;
-    this.visible = false;
-
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = this.size;
-    this.canvas.height = this.size;
-    this.canvas.className = 'minimap';
-    this.canvas.setAttribute('aria-hidden', 'true');
-    this.ctx = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
-
-    if (!this.ctx) {
-      throw new Error('Minimap 2D canvas unavailable');
-    }
-
-    host.appendChild(this.canvas);
-    this.setVisible(true);
-  }
-
-  setVisible(visible) {
-    this.visible = !!visible;
-    this.host.classList.toggle('hud--with-minimap', this.visible);
-    this.canvas.classList.toggle('hidden', !this.visible);
-  }
-
-  toggle() {
-    this.setVisible(!this.visible);
-    return this.visible;
-  }
-
-  worldToMap(x, z, bounds) {
-    const inner = this.size - this.pad * 2;
-    const nx = clamp01((x + bounds) / (bounds * 2));
-    const nz = clamp01((z + bounds) / (bounds * 2));
-    return {
-      x: this.pad + nx * inner,
-      y: this.pad + (1 - nz) * inner,
-    };
-  }
-
-  drawObstacle(bounds, box) {
-    const halfX = box.scale.x * 0.5;
-    const halfZ = box.scale.z * 0.5;
-
-    const tl = this.worldToMap(box.pos.x - halfX, box.pos.z + halfZ, bounds);
-    const br = this.worldToMap(box.pos.x + halfX, box.pos.z - halfZ, bounds);
-    const w = br.x - tl.x;
-    const h = br.y - tl.y;
-
-    if (w <= 0.25 || h <= 0.25) return;
-    this.ctx.fillRect(tl.x, tl.y, w, h);
-    this.ctx.strokeRect(tl.x, tl.y, w, h);
-  }
-
-  drawDot(pos, color, radius, bounds) {
-    const p = this.worldToMap(pos.x, pos.z, bounds);
-    this.ctx.beginPath();
-    this.ctx.fillStyle = color;
-    this.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    this.ctx.fill();
-  }
-
-  render() {
-    if (!this.visible) return;
-    const ctx = this.ctx;
-    const bounds = Math.max(1, this.game.mapBounds + 0.5);
-    const inner = this.size - this.pad * 2;
-
-    ctx.clearRect(0, 0, this.size, this.size);
-
-    ctx.fillStyle = 'rgba(6, 10, 16, 0.78)';
-    ctx.fillRect(0, 0, this.size, this.size);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, this.size - 1, this.size - 1);
-
-    const topLeft = this.worldToMap(-bounds, bounds, bounds);
-    ctx.strokeStyle = 'rgba(156, 186, 226, 0.45)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(topLeft.x, topLeft.y, inner, inner);
-
-    ctx.fillStyle = 'rgba(170, 188, 214, 0.16)';
-    ctx.strokeStyle = 'rgba(190, 207, 228, 0.34)';
-    for (const box of this.game.boxes) {
-      if (!box.solid) continue;
-      if (box.scale.x > 50 && box.scale.z > 50) continue;
-      this.drawObstacle(bounds, box);
-    }
-
-    if (this.game.mode !== 'ai') {
-      ctx.fillStyle = 'rgba(221, 231, 244, 0.72)';
-      ctx.font = '12px monospace';
-      ctx.fillText('MINIMAP', 16, this.size - 16);
-      return;
-    }
-
-    for (const bot of this.game.bots) {
-      if (!bot.alive) continue;
-      const team = normalizeTeam(bot.team)
-      const color = TEAM_VISUALS[team].hex
-      this.drawDot(bot.pos, color, 3, bounds);
-    }
-
-    if (this.game.playerAlive) {
-      this.drawDot(this.game.pos, '#4f9cff', 4, bounds);
-      const p = this.worldToMap(this.game.pos.x, this.game.pos.z, bounds);
-      const f = forwardFromYawPitch(this.game.yaw, 0);
-      const look = this.worldToMap(this.game.pos.x + f.x * 2.4, this.game.pos.z + f.z * 2.4, bounds);
-      ctx.strokeStyle = 'rgba(79, 156, 255, 0.95)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(look.x, look.y);
-      ctx.stroke();
-    }
-  }
-}
+// 旧的 Minimap 类已被 Radar 系统取代
+// 参见 radar.js
 
 const game = new Game();
-const minimap = new Minimap(hud, game);
-ensureMinimapActive();
+const radar = new Radar(hud, game);
+ensureRadarActive();
 resetPlayerLoadout();
+
+// Spectator mode initialization
+const spectatorManager = new SpectatorManager(game, null);
+const spectatorUI = new SpectatorUI();
+spectatorUI.init();
+
+// Spectator mode callbacks
+spectatorManager.onEnabled = () => {
+  spectatorUI.show();
+};
+
+spectatorManager.onDisabled = () => {
+  spectatorUI.hide();
+};
+
+spectatorManager.onModeChange = (oldMode, newMode) => {
+  const modeNames = {
+    [SPECTATOR_MODE.FIRST_PERSON]: '第一人称',
+    [SPECTATOR_MODE.THIRD_PERSON]: '第三人称',
+    [SPECTATOR_MODE.FREE_CAMERA]: '自由视角'
+  };
+  setStatus(`视角: ${modeNames[newMode] || newMode}`, false);
+};
+
+spectatorManager.onTargetChange = (targetId) => {
+  const targetInfo = spectatorManager.getTargetInfo();
+  if (targetInfo) {
+    setStatus(`观战: ${targetInfo.name}`, false);
+  }
+};
 
 // Multiplayer state
 const multiplayer = new MultiplayerClient();
@@ -1625,13 +2258,22 @@ function requestOnlineRespawnIn3s() {
   }, ONLINE_RESPAWN_DELAY_MS)
 }
 
-function handleLocalPlayerDeath(reason = 'You died') {
+function handleLocalPlayerDeath(reason = 'You died', deathData = {}) {
   if (!game.playerAlive && game.hp <= 0) return
   game.playerAlive = false
   game.hp = 0
   game.vel = v3(0, 0, 0)
   game.stats.deaths += 1
   setStatus(reason, true)
+  
+  // 启动观战模式
+  spectatorManager.start({
+    deathPosition: { ...game.pos },
+    killerId: deathData.killerId || null,
+    killerName: deathData.killerName || 'Unknown',
+    killerTeam: deathData.killerTeam || ''
+  })
+  
   requestOnlineRespawnIn3s()
 }
 
@@ -1759,9 +2401,9 @@ function handleRespawnEvent(data) {
   markRemotePlayerRespawned(respawnId, playerData, data)
 }
 
-function ensureMinimapActive() {
-  minimap.setVisible(true);
-  if (hud) hud.classList.add('hud--with-minimap');
+function ensureRadarActive() {
+  radar.setVisible(true);
+  if (hud) hud.classList.add('hud--with-radar');
 }
 
 showScreen('lobby');
@@ -1819,6 +2461,7 @@ function describeWeaponStats(def) {
 function getEquipLabel(type) {
   if (type === 'flash') return '闪光弹';
   if (type === 'smoke') return '烟雾弹';
+  if (type === 'molotov') return '燃烧弹';
   return '';
 }
 
@@ -2287,103 +2930,114 @@ function detectSiteAtPosition(pos) {
   return null;
 }
 
-function deploySmokeWall() {
+/**
+ * 部署投掷物（通用函数）
+ */
+function deployGrenade(type) {
+  const grenadeData = game.grenades[type];
+  if (!grenadeData) {
+    setStatus(`Unknown grenade type: ${type}`, true);
+    return false;
+  }
+
   if (game.mode !== 'ai') {
-    setStatus('Smoke available in AI mode only', true);
-    return;
-  }
-  if (game.smoke.cooldown > 0) {
-    setStatus(`Smoke cooldown ${game.smoke.cooldown.toFixed(1)}s`, true);
-    return;
-  }
-  if (game.smoke.charges <= 0) {
-    setStatus('No smoke charge', true);
-    return;
+    setStatus(`${type} available in AI mode only`, true);
+    return false;
   }
   if (!game.playerAlive) {
-    setStatus('Cannot use smoke while dead', true);
-    return;
+    setStatus(`Cannot use ${type} while dead`, true);
+    return false;
+  }
+  if (grenadeData.cooldown > 0) {
+    setStatus(`${type} cooldown ${grenadeData.cooldown.toFixed(1)}s`, true);
+    return false;
+  }
+  if (grenadeData.charges <= 0) {
+    setStatus(`No ${type} charge`, true);
+    return false;
   }
 
-  const p = v3(game.pos.x, 0.9, game.pos.z);
-  let best = null;
-  let bestD = Infinity;
-  for (const cp of game.smoke.chokePoints) {
-    const d = v3len(v3sub(p, cp.pos));
-    if (d < bestD) {
-      bestD = d;
-      best = cp;
-    }
-  }
-  if (!best) return;
+  // 计算投掷方向
+  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+  const throwDir = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
 
-  for (const s of game.smoke.active) {
-    if (s.id === best.id) {
-      setStatus(`Smoke already active at ${best.id}`, true);
-      return;
-    }
-  }
+  // 投掷
+  grenadeManager.throwGrenade(camPos, throwDir, type);
 
-  const half = v3(best.scale.x * 0.5, best.scale.y * 0.5, best.scale.z * 0.5);
-  game.smoke.active.push({
-    id: best.id,
-    pos: v3(best.pos.x, best.pos.y, best.pos.z),
-    scale: v3(best.scale.x, best.scale.y, best.scale.z),
-    aabb: aabbFromCenter(best.pos, half),
-    expiresAt: nowMs() + game.smoke.duration * 1000,
-  });
-  game.smoke.cooldown = game.smoke.cooldownTotal;
-  game.smoke.charges = Math.max(0, game.smoke.charges - 1);
-  rebuildGameplayColliders();
-  setStatus(`Smoke deployed: ${best.id}`, false);
+  grenadeData.cooldown = grenadeData.cooldownTotal;
+  grenadeData.charges = Math.max(0, grenadeData.charges - 1);
+
+  setStatus(`投掷 ${type}`, false);
+  renderBuyMenu();
+  return true;
 }
 
 function deployFlashbang() {
-  if (game.mode !== 'ai') {
-    setStatus('Flash available in AI mode only', true);
-    return;
-  }
-  if (!game.playerAlive) {
-    setStatus('Cannot use flash while dead', true);
-    return;
-  }
-  if (game.flashbang.cooldown > 0) {
-    setStatus(`Flash cooldown ${game.flashbang.cooldown.toFixed(1)}s`, true);
-    return;
-  }
-  if (game.flashbang.charges <= 0) {
-    setStatus('No flash charge', true);
-    return;
+  return deployGrenade('flash');
+}
+
+function deploySmokeWall() {
+  return deployGrenade('smoke');
+}
+
+function deployMolotov() {
+  return deployGrenade('molotov');
+}
+
+function updateGrenades(dt) {
+  // 更新投掷物管理器
+  grenadeManager.update(dt, game.colliders, game);
+
+  // 更新冷却
+  for (const type of ['flash', 'smoke', 'molotov']) {
+    const g = game.grenades[type];
+    if (g.cooldown > 0) {
+      g.cooldown = Math.max(0, g.cooldown - dt);
+    }
   }
 
-  game.flashbang.cooldown = game.flashbang.cooldownTotal;
-  game.flashbang.charges = Math.max(0, game.flashbang.charges - 1);
+  // 更新闪光效果
+  if (game.flashEffect.active) {
+    game.flashEffect.timer -= dt;
+    if (game.flashEffect.timer <= 0) {
+      game.flashEffect.active = false;
+      game.flashEffect.intensity = 0;
+    } else {
+      // 逐渐恢复
+      const recoveryProgress = 1 - (game.flashEffect.timer / game.flashEffect.duration);
+      game.flashEffect.intensity = Math.max(0, 1 - recoveryProgress * 1.5);
+    }
+  }
 
-  const origin = v3(game.pos.x, game.pos.y + 1.5, game.pos.z);
-  const fwd = v3norm(forwardFromYawPitch(game.yaw, 0));
-  const burst = v3add(origin, v3scale(fwd, 5.5));
-  let affected = 0;
+  // 清理过期的烟雾
   const tNow = nowMs();
+  game.grenades.smoke.active = game.grenades.smoke.active.filter(s => {
+    if (tNow >= s.expiresAt) {
+      if (s.system) s.system.alive = false;
+      return false;
+    }
+    return true;
+  });
 
-  for (const b of game.bots) {
-    if (!b.alive || b.team === game.team) continue;
-    const eye = v3(b.pos.x, b.pos.y + 1.4, b.pos.z);
-    const diff = v3sub(eye, burst);
-    const dist = v3len(diff);
-    if (dist <= 0.001 || dist > 14) continue;
-    const dir = v3scale(diff, 1 / dist);
-    if (rayBlockedBySmoke(burst, dir, dist)) continue;
-    b.nextThinkAt = Math.max(b.nextThinkAt, tNow + 1100);
-    b.shootCooldown = Math.max(b.shootCooldown, 1.3);
-    affected += 1;
+  // 清理过期的火焰
+  game.grenades.molotov.active = game.grenades.molotov.active.filter(f => {
+    if (tNow >= f.expiresAt) {
+      if (f.system) f.system.alive = false;
+      return false;
+    }
+    return true;
+  });
+
+  // 重建碰撞体（如果有变化）
+  if (game.grenades.smoke.active.length > 0 || game.grenades.molotov.active.length > 0) {
+    rebuildGameplayColliders();
   }
-
-  setStatus(`Flash popped (${affected})`, false);
-  renderBuyMenu();
 }
 
 function updateSmoke(dt) {
-  if (game.flashbang.cooldown > 0) {
+  // 兼容旧代码，现在由 updateGrenades 处理
+  updateGrenades(dt);
+}
     game.flashbang.cooldown = Math.max(0, game.flashbang.cooldown - dt);
   }
   if (game.smoke.cooldown > 0) {
@@ -2477,7 +3131,7 @@ function startAIMode() {
   game.mode = 'ai';
   showScreen('ai');
   setOverlayVisible(false);
-  ensureMinimapActive();
+  ensureRadarActive();
   game.playerAlive = true;
   closeBuyMenu();
   resetPlayerLoadout();
@@ -2673,7 +3327,7 @@ function startMultiplayerGame(roomId, roomName) {
   game.roomName = roomName
   showScreen('ai') // Reuse AI screen for now
   setOverlayVisible(false)
-  ensureMinimapActive()
+  ensureRadarActive()
   
   game.playerAlive = true
   clearOnlineRespawnTimer()
@@ -3496,8 +4150,8 @@ document.addEventListener('pointerlockerror', () => {
 document.addEventListener('keydown', (e) => {
   if (e.code === 'F5') {
     e.preventDefault();
-    const shown = minimap.toggle();
-    setStatus(`Minimap ${shown ? 'shown' : 'hidden'}`, false);
+    const shown = radar.toggleSize();
+    setStatus(`Radar ${shown > 0 ? `${shown}px` : 'hidden'}`, false);
     return;
   }
 
@@ -3569,18 +4223,18 @@ document.addEventListener('keydown', (e) => {
     else game.switchWeaponBySlot('secondary');
   }
   if (e.code === 'Digit2') game.switchWeaponBySlot('secondary');
-  if (e.code === 'Digit3') {
+  if (e.code === 'Digit3') game.switchWeaponBySlot('melee');
+  // 4键：闪光弹
+  if (e.code === 'Digit4') {
     game.switchEquip(game.currentEquip === 'flash' ? 'none' : 'flash');
   }
-  if (e.code === 'Digit4') {
+  // 5键：烟雾弹
+  if (e.code === 'Digit5') {
     game.switchEquip(game.currentEquip === 'smoke' ? 'none' : 'smoke');
   }
-  if (e.code === 'Digit5') game.switchWeaponBySlot('melee');
-  if (e.code === 'Digit3') {
-    game.switchEquip(game.currentEquip === 'flash' ? 'none' : 'flash');
-  }
-  if (e.code === 'Digit4') {
-    game.switchEquip(game.currentEquip === 'smoke' ? 'none' : 'smoke');
+  // 6键：燃烧弹
+  if (e.code === 'Digit6') {
+    game.switchEquip(game.currentEquip === 'molotov' ? 'none' : 'molotov');
   }
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'KeyB') toggleBuyMenu();
@@ -3633,6 +4287,12 @@ document.addEventListener('mousedown', (e) => {
       game.mouseDown = false;
       game.firePressed = false;
       deploySmokeWall();
+      return;
+    }
+    if (game.currentEquip === 'molotov') {
+      game.mouseDown = false;
+      game.firePressed = false;
+      deployMolotov();
       return;
     }
     game.mouseDown = true;
@@ -4086,27 +4746,25 @@ function updateWeapon(dt) {
     bestTarget = null;
   }
 
-  for (const bot of game.bots) {
-    if (!bot.alive) continue;
-    const up = v3(0, 1, 0);
-    const f = v3norm(forwardFromYawPitch(bot.yaw, 0));
-    const r = v3norm(v3cross(up, f));
-    const u = up;
-    const base = v3(bot.pos.x, bot.pos.y, bot.pos.z);
-    const hip = v3add(base, v3(0, 0.95, 0));
+  // AI Bot collision detection with optimized multi-zone hitboxes
+  collisionPerf.rayCasts++;
+  const botCandidates = game.bots.filter(b => b.alive);
+  collisionPerf.broadPhaseCandidates += botCandidates.length;
 
-    const hitboxes = [
-      { zone: 'head', mult: 4.0, c: v3add(hip, v3(0, 1.18, 0.02)), h: v3(0.16, 0.16, 0.16) },
-      { zone: 'upper', mult: 1.25, c: v3add(hip, v3(0, 0.78, 0.02)), h: v3(0.25, 0.22, 0.16) },
-      { zone: 'lower', mult: 1.0, c: v3add(hip, v3(0, 0.25, 0)), h: v3(0.28, 0.38, 0.15) },
-      { zone: 'arm', mult: 0.75, c: v3add(hip, v3(0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09) },
-      { zone: 'arm', mult: 0.75, c: v3add(hip, v3(-0.42, 0.78, 0.02)), h: v3(0.09, 0.28, 0.09) },
-      { zone: 'leg', mult: 0.75, c: v3add(base, v3(0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11) },
-      { zone: 'leg', mult: 0.75, c: v3add(base, v3(-0.18, 0.45, 0)), h: v3(0.11, 0.45, 0.11) },
-    ];
+  for (const bot of botCandidates) {
+    const base = v3(bot.pos.x, bot.pos.y, bot.pos.z);
+    const hitboxes = buildPlayerHitboxes(base, bot.yaw);
+
+    // Early exit: check if bot is even in range before testing hitboxes
+    const distToBot = v3len(v3sub(roAim, base));
+    if (distToBot > 90) {
+      collisionPerf.earlyExits++;
+      continue;
+    }
 
     for (const hb of hitboxes) {
-      const t = rayObbLocal(roAim, rdAim, hb.c, r, u, f, hb.h);
+      collisionPerf.narrowPhaseTests++;
+      const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
       if (t === null) continue;
       if (t > 0 && t < bestT) {
         bestT = t;
@@ -4117,41 +4775,56 @@ function updateWeapon(dt) {
     }
   }
 
-  // 多人模式：检测其他玩家
+  // 多人模式：精确碰撞检测（多区域命中判定）
   if (game.mode === 'online') {
-    // RayCaster 客户端命中检测
+    collisionPerf.rayCasts++;
+    const playerCandidates = [];
+
+    // Broad phase: collect valid targets
     for (const [playerId, playerData] of otherPlayers) {
-      if (!playerData || playerData.deathHidden) continue
-      const hp = readSyncedHp(playerData, 100)
-      if (playerData.alive === false || hp <= 0) continue
+      if (!playerData || playerData.deathHidden) continue;
+      const hp = readSyncedHp(playerData, 100);
+      if (playerData.alive === false || hp <= 0) continue;
+      if (playerData.team === game.team) continue; // 不攻击队友
+      if (!playerData.position) continue;
 
-      // 不攻击队友
-      if (playerData.team === game.team) continue
+      // Early exit: skip players too far away
+      const pos = playerData.position;
+      const dist = Math.hypot(pos.x - roAim.x, pos.y - roAim.y, pos.z - roAim.z);
+      if (dist > 90) {
+        collisionPerf.earlyExits++;
+        continue;
+      }
 
-      const pos = playerData.position
-      if (!pos) continue
-      const playerPos = v3(pos.x, pos.y + 0.9, pos.z) // 中心位置
-      const half = v3(0.3, 0.9, 0.3)
-      const aabb = aabbFromCenter(playerPos, half)
-      const t = rayAabb(roAim, rdAim, aabb)
+      playerCandidates.push({ playerId, playerData });
+    }
+    collisionPerf.broadPhaseCandidates += playerCandidates.length;
 
-      if (t !== null && t > 0 && t < bestT) {
-        // 头部检测（更高伤害）
-        const headPos = v3(pos.x, pos.y + 1.6, pos.z)
-        const headHalf = v3(0.15, 0.15, 0.15)
-        const headAabb = aabbFromCenter(headPos, headHalf)
-        const headT = rayAabb(roAim, rdAim, headAabb)
+    // Narrow phase: test multi-zone hitboxes
+    for (const { playerId, playerData } of playerCandidates) {
+      const pos = playerData.position;
+      const basePos = v3(pos.x, pos.y, pos.z);
+      const yaw = playerData.yaw || 0;
 
-        if (headT !== null && headT > 0 && headT < bestT) {
-          bestT = headT
-          bestTarget = { type: 'player', playerId, playerData }
-          bestZone = 'head'
-          bestMult = 2.5 // 头部伤害倍数
-        } else {
-          bestT = t
-          bestTarget = { type: 'player', playerId, playerData }
-          bestZone = 'body'
-          bestMult = 1
+      // Use same multi-zone hitbox system as AI bots
+      const hitboxes = buildPlayerHitboxes(basePos, yaw);
+
+      for (const hb of hitboxes) {
+        collisionPerf.narrowPhaseTests++;
+        const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
+
+        if (t !== null && t > 0 && t < bestT) {
+          bestT = t;
+          bestTarget = { type: 'player', playerId, playerData, position: playerData.position };
+          bestZone = hb.zone;
+          bestMult = hb.mult;
+
+          // Early exit optimization: if we hit head, skip remaining zones for this player
+          // (head is checked first due to priority in buildPlayerHitboxes)
+          if (hb.zone === 'head') {
+            collisionPerf.earlyExits++;
+            break;
+          }
         }
       }
     }
@@ -4159,30 +4832,34 @@ function updateWeapon(dt) {
 
   if (bestTarget) {
     // 距离衰减伤害计算
-    const distance = v3len(v3sub(roAim, bestTarget.pos || bestTarget.playerData.position))
-    const maxRange = 80 // 最大有效射程
-    const falloffStart = 20 // 开始衰减的距离
-    const falloffMult = distance < falloffStart 
-      ? 1.0 
-      : distance > maxRange 
-        ? 0.1 
-        : 1.0 - ((distance - falloffStart) / (maxRange - falloffStart)) * 0.9
+    const targetPos = bestTarget.pos || bestTarget.position || (bestTarget.playerData && bestTarget.playerData.position);
+    const distance = targetPos ? v3len(v3sub(roAim, targetPos)) : 0;
+    const maxRange = 80; // 最大有效射程
+    const falloffStart = 20; // 开始衰减的距离
+    const falloffMult = distance < falloffStart
+      ? 1.0
+      : distance > maxRange
+        ? 0.1
+        : 1.0 - ((distance - falloffStart) / (maxRange - falloffStart)) * 0.9;
 
-    const dmg = Math.floor(w.def.damage * bestMult * falloffMult)
+    const dmg = Math.floor(w.def.damage * bestMult * falloffMult);
 
     // 多人模式：发送伤害事件到服务器
     if (bestTarget.type === 'player') {
-      const weaponType = w && w.def ? w.def.id : 'unknown'
+      const weaponType = w && w.def ? w.def.id : 'unknown';
+      // 标准化伤害区域命名
+      const normalizedZone = bestZone === 'torso' ? 'body' : bestZone;
       multiplayer.sendHit(bestTarget.playerId, dmg, weaponType, {
-        hitZone: bestZone || 'body',
+        hitZone: normalizedZone || 'body',
         headshot: bestZone === 'head'
-      })
+      });
       audio.hit();
       game.lastStatusAt = nowMs();
       game.hitmarker.t = 0.12;
       game.hitmarker.head = bestZone === 'head';
-      spawnDamageNumberForPlayer(bestTarget.playerId, dmg, { crit: bestZone === 'head' })
-      setStatus(`Hit ${bestTarget.playerData.name}: -${dmg}`, false)
+      spawnDamageNumberForPlayer(bestTarget.playerId, dmg, { crit: bestZone === 'head' });
+      const zoneLabel = bestZone === 'head' ? 'HEADSHOT' : (bestZone || 'body').toUpperCase();
+      setStatus(`Hit ${bestTarget.playerData.name} [${zoneLabel}]: -${dmg}`, false);
     } else {
       // AI 模式：本地处理bot伤害
       bestTarget.hp -= dmg;
@@ -4197,7 +4874,7 @@ function updateWeapon(dt) {
         game.stats.kills += 1;
         if (bestTarget.team !== game.team) addMoney(game.econ.rewardKill);
       } else {
-        const z = bestZone ? ` ${bestZone}` : '';
+        const z = bestZone ? ` [${bestZone.toUpperCase()}]` : '';
         setStatus(`Hit${z}: -${dmg}`, false);
       }
     }
@@ -5665,6 +6342,45 @@ function drawWeaponIcon(ctx, x, y, weaponId) {
   ctx.fillText(info.name.split(' ')[0], x, y) // 只绘制emoji部分
 }
 
+/**
+ * 渲染投掷物效果（粒子 + 闪光）
+ */
+function renderGrenadeEffects() {
+  // 创建或获取粒子渲染 canvas
+  let particleCanvas = document.getElementById('particleCanvas');
+  if (!particleCanvas) {
+    particleCanvas = document.createElement('canvas');
+    particleCanvas.id = 'particleCanvas';
+    particleCanvas.style.position = 'absolute';
+    particleCanvas.style.top = '0';
+    particleCanvas.style.left = '0';
+    particleCanvas.style.width = '100%';
+    particleCanvas.style.height = '100%';
+    particleCanvas.style.pointerEvents = 'none';
+    particleCanvas.style.zIndex = '5';
+    canvas.parentElement.appendChild(particleCanvas);
+  }
+
+  // 确保 canvas 尺寸匹配
+  if (particleCanvas.width !== canvas.width || particleCanvas.height !== canvas.height) {
+    particleCanvas.width = canvas.width;
+    particleCanvas.height = canvas.height;
+  }
+
+  const ctx = particleCanvas.getContext('2d');
+  ctx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+
+  // 渲染投掷物粒子效果
+  grenadeManager.render(ctx, particleCanvas.width, particleCanvas.height, game);
+
+  // 渲染闪光效果（白屏逐渐恢复）
+  if (game.flashEffect.active && game.flashEffect.intensity > 0) {
+    const alpha = game.flashEffect.intensity;
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+    ctx.fillRect(0, 0, particleCanvas.width, particleCanvas.height);
+  }
+}
+
 let last = nowMs();
 function frame() {
   const t = nowMs();
@@ -5702,8 +6418,9 @@ function frame() {
 
   updateHud();
   drawWorld();
-  minimap.render();
+  radar.render();
   renderOtherPlayersUI(); // 渲染其他玩家的 UI 元素
+  renderGrenadeEffects(); // 渲染投掷物效果
 
   // 更新计分板（多人模式）
   if (game.mode === 'online' && frameCount % 60 === 0) { // 每秒更新一次（60帧）
