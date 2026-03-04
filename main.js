@@ -1629,6 +1629,13 @@ const EQUIPMENT_DEFS = {
     price: 300,
     desc: '烟雾遮挡',
   },
+  molotov: {
+    id: 'molotov',
+    name: '燃烧弹',
+    category: 'gear',
+    price: 400,
+    desc: '持续伤害',
+  },
   armor: {
     id: 'armor',
     name: '防弹衣',
@@ -1660,6 +1667,7 @@ const SHOP_ITEMS = [
   { keyCode: 'KeyQ', keyLabel: 'Q', type: 'equip', id: 'flash' },
   { keyCode: 'KeyW', keyLabel: 'W', type: 'equip', id: 'smoke' },
   { keyCode: 'KeyE', keyLabel: 'E', type: 'equip', id: 'armor' },
+  { keyCode: 'KeyR', keyLabel: 'R', type: 'equip', id: 'molotov' },
 ];
 
 const SHOP_ITEM_BY_KEY = new Map(SHOP_ITEMS.map((item) => [item.keyCode, item]));
@@ -1883,7 +1891,7 @@ class Game {
   }
 
   switchEquip(equipId) {
-    if (equipId !== 'flash' && equipId !== 'smoke' && equipId !== 'none') return;
+    if (equipId !== 'flash' && equipId !== 'smoke' && equipId !== 'molotov' && equipId !== 'none') return;
     this.currentEquip = equipId;
     // 切换投掷物时清空射击输入，避免误开火
     this.mouseDown = false;
@@ -2392,6 +2400,9 @@ function handleRespawnEvent(data) {
     game.hp = readSyncedHp(data, 100)
     game.armor = typeof data.armor === 'number' ? clamp(data.armor, 0, 100) : game.armor
 
+    // 停止观战模式
+    spectatorManager.stop()
+
     if (data.position) {
       game.pos = v3(
         safeNumber(data.position.x, game.pos.x),
@@ -2742,15 +2753,21 @@ function tryBuyShopItem(item) {
     renderBuyMenu();
     return true;
   }
-  if (item.id === 'flash' && game.flashbang.charges >= game.flashbang.maxCharges) {
+  if (item.id === 'flash' && game.grenades.flash.charges >= game.grenades.flash.maxCharges) {
     setStatus('闪光弹库存已满', true);
     setBuyNotice('闪光弹库存已满', true);
     renderBuyMenu();
     return true;
   }
-  if (item.id === 'smoke' && game.smoke.charges >= game.smoke.maxCharges) {
+  if (item.id === 'smoke' && game.grenades.smoke.charges >= game.grenades.smoke.maxCharges) {
     setStatus('烟雾弹库存已满', true);
     setBuyNotice('烟雾弹库存已满', true);
+    renderBuyMenu();
+    return true;
+  }
+  if (item.id === 'molotov' && game.grenades.molotov.charges >= game.grenades.molotov.maxCharges) {
+    setStatus('燃烧弹库存已满', true);
+    setBuyNotice('燃烧弹库存已满', true);
     renderBuyMenu();
     return true;
   }
@@ -2763,8 +2780,9 @@ function tryBuyShopItem(item) {
   }
 
   if (item.id === 'armor') game.armor = 100;
-  if (item.id === 'flash') game.flashbang.charges += 1;
-  if (item.id === 'smoke') game.smoke.charges += 1;
+  if (item.id === 'flash') game.grenades.flash.charges += 1;
+  if (item.id === 'smoke') game.grenades.smoke.charges += 1;
+  if (item.id === 'molotov') game.grenades.molotov.charges += 1;
 
   const ok = `购买成功：${def.name} ($${def.price})`;
   setStatus(ok, false);
@@ -3180,11 +3198,30 @@ function startAIMode() {
   game.round.postLeft = 0;
   game.round.freezeLeft = game.round.freezeTotal;
   game.round.roundLeft = game.round.roundTotal;
-  game.smoke.active = [];
-  game.smoke.cooldown = 0;
-  game.smoke.charges = 0;
-  game.flashbang.cooldown = 0;
-  game.flashbang.charges = 0;
+
+  // 重置投掷物系统
+  game.grenades.flash.active = [];
+  game.grenades.flash.cooldown = 0;
+  game.grenades.flash.charges = 0;
+  game.grenades.smoke.active = [];
+  game.grenades.smoke.cooldown = 0;
+  game.grenades.smoke.charges = 0;
+  game.grenades.molotov.active = [];
+  game.grenades.molotov.cooldown = 0;
+  game.grenades.molotov.charges = 0;
+  
+  // 清理投掷物管理器
+  grenadeManager.clear();
+  
+  // 重置闪光效果
+  game.flashEffect.active = false;
+  game.flashEffect.intensity = 0;
+  game.flashEffect.timer = 0;
+  
+  // 兼容旧代码的别名
+  game.smoke = game.grenades.smoke;
+  game.flashbang = game.grenades.flash;
+
   rebuildGameplayColliders();
   rebuildBots(game.botCount);
   game.econ.money = game.econ.initialMoney;
@@ -4176,6 +4213,35 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // 观战模式控制
+  if (spectatorManager.isEnabled()) {
+    // 空格键：切换观战目标
+    if (e.code === 'Space') {
+      e.preventDefault();
+      spectatorManager.nextTarget();
+      return;
+    }
+    // Q键：切换视角模式
+    if (e.code === 'KeyQ') {
+      e.preventDefault();
+      spectatorManager.cycleMode();
+      return;
+    }
+    // 自由视角模式下，WASD控制移动
+    if (spectatorManager.getMode() === SPECTATOR_MODE.FREE_CAMERA) {
+      if (
+        e.code === 'KeyW' ||
+        e.code === 'KeyA' ||
+        e.code === 'KeyS' ||
+        e.code === 'KeyD' ||
+        e.code === 'ShiftLeft' ||
+        e.code === 'ShiftRight'
+      ) {
+        e.preventDefault();
+      }
+    }
+  }
+
   if (game.pointerLocked) {
     if (
       e.code === 'KeyW' ||
@@ -4517,6 +4583,19 @@ setMatchMode('bomb');
 applyVolumesFromUI();
 
 document.addEventListener('mousemove', (e) => {
+  // 观战模式下，自由视角需要鼠标控制
+  if (spectatorManager.isEnabled() && spectatorManager.getMode() === SPECTATOR_MODE.FREE_CAMERA) {
+    // 自由视角模式下，直接更新game.yaw和game.pitch用于观战
+    const sens = 0.0022;
+    game.yaw += e.movementX * sens;
+    game.pitch -= e.movementY * sens;
+    game.mouseDX = game.mouseDX * 0.6 + e.movementX * 0.4;
+    game.mouseDY = game.mouseDY * 0.6 + e.movementY * 0.4;
+    const maxPitch = Math.PI / 2 - 0.02;
+    game.pitch = clamp(game.pitch, -maxPitch, maxPitch);
+    return;
+  }
+
   if (!game.pointerLocked) return;
   const sens = 0.0022;
   game.yaw += e.movementX * sens;
@@ -5986,7 +6065,17 @@ function drawWorld() {
 
   const currentEquip = typeof game.currentEquip === 'string' ? game.currentEquip : 'none';
   if (currentEquip !== 'none') {
-    const grenadeColor = currentEquip === 'flash' ? v3(1.0, 1.0, 0.0) : v3(68 / 255, 68 / 255, 68 / 255);
+    // 根据投掷物类型设置颜色
+    let grenadeColor;
+    if (currentEquip === 'flash') {
+      grenadeColor = v3(1.0, 1.0, 0.0); // 黄色
+    } else if (currentEquip === 'smoke') {
+      grenadeColor = v3(68 / 255, 68 / 255, 68 / 255); // 深灰色
+    } else if (currentEquip === 'molotov') {
+      grenadeColor = v3(0.8, 0.2, 0.1); // 红橙色
+    } else {
+      grenadeColor = v3(0.5, 0.5, 0.5); // 默认灰色
+    }
     const wobbleT = nowMs() * 0.001;
     const wobbleX = Math.sin(wobbleT * 6.8) * 0.015;
     const wobbleY = Math.cos(wobbleT * 5.6) * 0.01;
