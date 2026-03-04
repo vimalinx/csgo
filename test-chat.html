@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CSGO 聊天系统测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #1a1a2e;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #gameCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+
+    #instructions {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      padding: 20px 30px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 1000;
+    }
+
+    #instructions h2 {
+      margin: 0 0 15px 0;
+      color: #4CAF50;
+    }
+
+    #instructions p {
+      margin: 8px 0;
+      font-size: 14px;
+    }
+
+    .key {
+      display: inline-block;
+      background: #333;
+      padding: 5px 12px;
+      border-radius: 5px;
+      margin: 0 5px;
+      font-weight: bold;
+      color: #FFB74D;
+    }
+
+    #testControls {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 1000;
+    }
+
+    #testControls h3 {
+      margin: 0 0 15px 0;
+      color: #2196F3;
+    }
+
+    .test-btn {
+      display: block;
+      width: 100%;
+      padding: 10px 20px;
+      margin: 8px 0;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.3s;
+    }
+
+    .test-btn:hover {
+      background: #45a049;
+    }
+
+    .test-btn.team {
+      background: #2196F3;
+    }
+
+    .test-btn.team:hover {
+      background: #1976D2;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="instructions">
+    <h2>🎮 CSGO 聊天系统测试</h2>
+    <p><span class="key">Y</span> 全局聊天</p>
+    <p><span class="key">U</span> 队伍聊天</p>
+    <p><span class="key">Enter</span> 发送消息</p>
+    <p><span class="key">Escape</span> 关闭聊天</p>
+  </div>
+
+  <div id="testControls">
+    <h3>📝 测试控制</h3>
+    <button class="test-btn" onclick="testGlobalChat()">测试全局聊天</button>
+    <button class="test-btn team" onclick="testTeamChat()">测试队伍聊天</button>
+    <button class="test-btn" onclick="clearChat()">清空聊天</button>
+  </div>
+
+  <script type="module">
+    // 导入聊天 UI 模块
+    import { createChatUI, addChatMessage, toggleChatInput, getCurrentChatChannel } from './multiplayer-ui.js'
+
+    // 创建聊天 UI
+    createChatUI()
+
+    // 模拟 game 对象
+    window.game = {
+      mode: 'online',
+      pointerLocked: false
+    }
+
+    // 模拟 multiplayer 对象
+    window.multiplayer = {
+      username: 'TestPlayer',
+      sendChat: (message, channel) => {
+        console.log(`[聊天测试] 发送消息: "${message}" (频道: ${channel})`)
+        // 模拟收到消息回显
+        setTimeout(() => {
+          const otherPlayers = ['Player1', 'Player2', 'Player3']
+          const randomPlayer = otherPlayers[Math.floor(Math.random() * otherPlayers.length)]
+          const responses = [
+            '收到！',
+            '好的，了解',
+            '👍',
+            '我来了',
+            '等待指令',
+            '准备就绪'
+          ]
+          const randomResponse = responses[Math.floor(Math.random() * responses.length)]
+          addChatMessage(channel, randomPlayer, randomResponse, channel === 'team' ? 'ct' : '')
+        }, 500 + Math.random() * 1000)
+      }
+    }
+
+    // 测试全局聊天
+    window.testGlobalChat = () => {
+      console.log('测试全局聊天...')
+      toggleChatInput(true, 'global')
+      // 模拟自动输入并发送
+      setTimeout(() => {
+        const chatInput = document.getElementById('chatInput')
+        if (chatInput) {
+          chatInput.value = '测试全局聊天消息'
+          chatInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+        }
+      }, 100)
+    }
+
+    // 测试队伍聊天
+    window.testTeamChat = () => {
+      console.log('测试队伍聊天...')
+      toggleChatInput(true, 'team')
+      // 模拟自动输入并发送
+      setTimeout(() => {
+        const chatInput = document.getElementById('chatInput')
+        if (chatInput) {
+          chatInput.value = '测试队伍聊天消息'
+          chatInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+        }
+      }, 100)
+    }
+
+    // 清空聊天
+    window.clearChat = () => {
+      const chatHistory = document.getElementById('chatHistory')
+      if (chatHistory) {
+        chatHistory.innerHTML = ''
+      }
+    }
+
+    // 监听键盘事件（模拟游戏中的快捷键）
+    document.addEventListener('keydown', (e) => {
+      const chatInput = document.getElementById('chatInput')
+
+      // Y键 - 全局聊天
+      if ((e.key === 'y' || e.key === 'Y') && (!chatInput || chatInput.style.display === 'none')) {
+        e.preventDefault()
+        console.log('按下了 Y 键 - 全局聊天')
+        toggleChatInput(true, 'global')
+      }
+
+      // U键 - 队伍聊天
+      if ((e.key === 'u' || e.key === 'U') && (!chatInput || chatInput.style.display === 'none')) {
+        e.preventDefault()
+        console.log('按下了 U 键 - 队伍聊天')
+        toggleChatInput(true, 'team')
+      }
+
+      // 聊天输入监听
+      if (chatInput && chatInput.style.display !== 'none') {
+        if (e.key === 'Enter') {
+          const message = chatInput.value.trim()
+          if (message) {
+            const currentChannel = getCurrentChatChannel()
+            window.multiplayer.sendChat(message, currentChannel)
+            addChatMessage(currentChannel, window.multiplayer.username, message, window.multiplayer.getLocalVisualState?.()?.team || '')
+          }
+          chatInput.value = ''
+          toggleChatInput(false)
+        } else if (e.key === 'Escape') {
+          chatInput.value = ''
+          toggleChatInput(false)
+        }
+      }
+    })
+
+    // 初始化时显示欢迎消息
+    setTimeout(() => {
+      addChatMessage('global', '系统', '欢迎来到 CSGO 聊天系统测试！', '')
+    }, 500)
+  </script>
+</body>
+</html>

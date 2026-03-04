@@ -28,6 +28,19 @@ function getHealthBarColor(ratio) {
   return `hsl(${hue}, 85%, 50%)`
 }
 
+function formatPlayerName(playerName) {
+  const safeName = typeof playerName === 'string' ? playerName.trim() : ''
+  if (safeName.length <= 15) return safeName
+  return `${safeName.slice(0, 15)}...`
+}
+
+function getPlayerNameColor(team) {
+  const normalizedTeam = typeof team === 'string' ? team.trim().toUpperCase() : ''
+  if (normalizedTeam === 'CT') return '#A8D4FF'
+  if (normalizedTeam === 'T') return '#FFB3B3'
+  return '#fff'
+}
+
 function getHealthBarLayer() {
   let layer = document.getElementById('playerHealthBarLayer')
   if (layer) return layer
@@ -51,7 +64,14 @@ function getHealthBarLayer() {
 /**
  * Create or update a floating health bar for a player
  */
-export function createHealthBar(playerId, x, y, hp = PLAYER_HEALTH_BAR_MAX_HP) {
+export function createHealthBar(
+  playerId,
+  x,
+  y,
+  hp = PLAYER_HEALTH_BAR_MAX_HP,
+  playerName = '',
+  team = ''
+) {
   if (!playerId) return null
 
   let healthBar = playerHealthBars.get(playerId)
@@ -63,6 +83,16 @@ export function createHealthBar(playerId, x, y, hp = PLAYER_HEALTH_BAR_MAX_HP) {
       transform: translate(-50%, -50%);
       pointer-events: none;
       min-width: 60px;
+    `
+
+    const nameText = document.createElement('div')
+    nameText.style.cssText = `
+      font: 11px sans-serif;
+      color: #fff;
+      text-align: center;
+      line-height: 1;
+      margin-bottom: 2px;
+      text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
     `
 
     const text = document.createElement('div')
@@ -94,11 +124,12 @@ export function createHealthBar(playerId, x, y, hp = PLAYER_HEALTH_BAR_MAX_HP) {
     `
 
     track.appendChild(fill)
+    root.appendChild(nameText)
     root.appendChild(text)
     root.appendChild(track)
     getHealthBarLayer().appendChild(root)
 
-    healthBar = { root, text, fill }
+    healthBar = { root, nameText, text, fill }
     playerHealthBars.set(playerId, healthBar)
   }
 
@@ -109,7 +140,11 @@ export function createHealthBar(playerId, x, y, hp = PLAYER_HEALTH_BAR_MAX_HP) {
 
   const currentHp = clampHealth(hp)
   const hpRatio = currentHp / PLAYER_HEALTH_BAR_MAX_HP
+  const safeName = formatPlayerName(playerName)
 
+  healthBar.nameText.textContent = safeName
+  healthBar.nameText.style.color = getPlayerNameColor(team)
+  healthBar.nameText.style.display = safeName ? 'block' : 'none'
   healthBar.text.textContent = `${Math.round(currentHp)}/${PLAYER_HEALTH_BAR_MAX_HP} HP`
   healthBar.fill.style.width = `${(hpRatio * 100).toFixed(2)}%`
   healthBar.fill.style.backgroundColor = getHealthBarColor(hpRatio)
@@ -1245,9 +1280,24 @@ export function toggleScoreboard(visible) {
 }
 
 /**
+ * HTML转义函数（防XSS）
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+/**
  * Create chat system UI
  */
 export function createChatUI() {
+  // 移除已存在的聊天UI
+  const existingChat = document.getElementById('chatContainer')
+  if (existingChat) {
+    existingChat.remove()
+  }
+
   // 聊天容器
   const chatContainer = document.createElement('div')
   chatContainer.id = 'chatContainer'
@@ -1255,9 +1305,11 @@ export function createChatUI() {
     position: fixed;
     bottom: 50px;
     left: 10px;
-    width: 300px;
+    width: 320px;
+    max-height: 250px;
     z-index: 10000;
     font-family: Arial, sans-serif;
+    pointer-events: none;
   `
 
   // 聊天历史
@@ -1265,13 +1317,37 @@ export function createChatUI() {
   chatHistory.id = 'chatHistory'
   chatHistory.style.cssText = `
     width: 100%;
-    max-height: 200px;
+    height: 200px;
     overflow-y: auto;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 5px;
+    overflow-x: hidden;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 8px;
     margin-bottom: 5px;
-    border-radius: 3px;
+    border-radius: 5px;
+    pointer-events: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.3) rgba(0, 0, 0, 0.3);
   `
+
+  // WebKit 滚动条样式
+  const style = document.createElement('style')
+  style.textContent = `
+    #chatHistory::-webkit-scrollbar {
+      width: 6px;
+    }
+    #chatHistory::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+    }
+    #chatHistory::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+    }
+    #chatHistory::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+  `
+  document.head.appendChild(style)
+
   chatContainer.appendChild(chatHistory)
 
   // 聊天输入框
@@ -1282,72 +1358,132 @@ export function createChatUI() {
   chatInput.maxLength = 100
   chatInput.style.cssText = `
     width: 100%;
-    padding: 8px;
-    font-size: 14px;
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid #444;
-    border-radius: 3px;
+    padding: 8px 10px;
+    font-size: 13px;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid #555;
+    border-radius: 4px;
     color: white;
     display: none;
+    pointer-events: auto;
+    outline: none;
   `
+  chatInput.addEventListener('focus', () => {
+    chatInput.style.borderColor = '#4CAF50'
+  })
+  chatInput.addEventListener('blur', () => {
+    chatInput.style.borderColor = '#555'
+  })
   chatContainer.appendChild(chatInput)
 
   document.body.appendChild(chatContainer)
 
-  return chatContainer
+  return { chatContainer, chatHistory, chatInput }
 }
 
 /**
  * Add chat message to history
  */
-export function addChatMessage(channel, playerName, message) {
+export function addChatMessage(channel, playerName, message, team = '') {
   const chatHistory = document.getElementById('chatHistory')
   if (!chatHistory) return
 
   const messageEl = document.createElement('div')
   messageEl.style.cssText = `
-    padding: 3px 0;
+    padding: 4px 6px;
     font-size: 12px;
+    line-height: 1.4;
     opacity: 1;
-    transition: opacity 0.5s ease-in-out;
+    transition: opacity 0.3s ease-in-out;
+    word-wrap: break-word;
   `
+
+  // HTML转义（防XSS）
+  const safeMessage = escapeHtml(message)
+  const safePlayerName = escapeHtml(playerName || 'Unknown')
+  const safeTeam = escapeHtml(team || '')
 
   // 格式化时间
   const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
   // 根据频道设置颜色
-  let channelColor = 'white'
+  let channelLabel = '全局'
+  let channelColor = '#FFB74D' // 橙色
+
   if (channel === 'team') {
-    channelColor = '#4A90E2' // CT蓝色（简化，实际应根据玩家阵营）
+    channelLabel = '队伍'
+    // 根据队伍设置颜色
+    if (team === 'ct' || team === 'CT') {
+      channelColor = '#4A90E2' // 蓝色
+    } else if (team === 't' || team === 'T') {
+      channelColor = '#E57373' // 红色
+    } else {
+      channelColor = '#81C784' // 绿色
+    }
   }
 
-  messageEl.innerHTML = `<span style="color: #888;">[${time}]</span> <span style="color: ${channelColor};">[${channel === 'global' ? '全局' : '队伍'}]</span> <span style="color: white;">${playerName}:</span> <span style="color: #ddd;">${message}</span>`
+  // 消息格式: [队伍][玩家名]: 消息内容
+  const teamPrefix = safeTeam ? `[${safeTeam}]` : ''
+  messageEl.innerHTML = `<span style="color: #888;">[${time}]</span> <span style="color: ${channelColor}; font-weight: bold;">[${channelLabel}]${teamPrefix}</span> <span style="color: #e0e0e0;">${safePlayerName}:</span> <span style="color: #f5f5f5;">${safeMessage}</span>`
 
   chatHistory.appendChild(messageEl)
 
   // 自动滚动到底部
   chatHistory.scrollTop = chatHistory.scrollHeight
 
-  // 5秒后淡出
+  // 10秒后淡化显示（不删除，只是变透明）
   setTimeout(() => {
-    messageEl.style.opacity = '0.5'
-  }, 5000)
+    messageEl.style.opacity = '0.6'
+  }, 10000)
 
-  // 保持最近10条消息
-  while (chatHistory.children.length > 10) {
+  // 保持最近20条消息
+  while (chatHistory.children.length > 20) {
     chatHistory.removeChild(chatHistory.firstChild)
   }
 }
 
 /**
- * Toggle chat input visibility
+ * Toggle chat input visibility with channel support
+ * @param {boolean} visible - 显示/隐藏输入框
+ * @param {string} channel - 聊天频道 ('global' 或 'team')
  */
-export function toggleChatInput(visible) {
+export function toggleChatInput(visible, channel = 'global') {
   const chatInput = document.getElementById('chatInput')
   if (!chatInput) return
 
   chatInput.style.display = visible ? 'block' : 'none'
+
   if (visible) {
+    // 设置频道信息
+    chatInput.dataset.channel = channel
+    if (channel === 'team') {
+      chatInput.placeholder = '按 Enter 发送消息 (队伍)'
+      chatInput.style.borderColor = '#4A90E2'
+    } else {
+      chatInput.placeholder = '按 Enter 发送消息 (全局)'
+      chatInput.style.borderColor = '#FFB74D'
+    }
     chatInput.focus()
+    chatInput.value = '' // 清空输入框
+  } else {
+    chatInput.dataset.channel = ''
+    chatInput.value = ''
   }
+}
+
+/**
+ * Get current chat channel from input
+ * @returns {string} - 当前聊天频道 ('global' 或 'team')
+ */
+export function getCurrentChatChannel() {
+  const chatInput = document.getElementById('chatInput')
+  if (!chatInput) return 'global'
+  return chatInput.dataset.channel || 'global'
+}
+
+/**
+ * Hide chat input
+ */
+export function hideChatInput() {
+  toggleChatInput(false)
 }

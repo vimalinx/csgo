@@ -855,3 +855,85 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================
+   Chat System Styles
+   聊天系统样式
+   ============================================ */
+
+#chatContainer {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+#chatHistory {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+#chatHistory > div {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#chatInput::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+#chatInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.5);
+}
+
+/* 聊天频道颜色 */
+.chat-channel-global {
+  color: #FFB74D;
+  font-weight: bold;
+}
+
+.chat-channel-team {
+  color: #4A90E2;
+  font-weight: bold;
+}
+
+/* 响应式聊天容器 */
+@media (max-width: 768px) {
+  #chatContainer {
+    width: 280px;
+    bottom: 40px;
+    left: 5px;
+  }
+
+  #chatHistory {
+    height: 150px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  #chatContainer {
+    width: 240px;
+    bottom: 30px;
+    left: 5px;
+  }
+
+  #chatHistory {
+    height: 120px;
+  }
+}
+

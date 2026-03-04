@@ -38,6 +38,8 @@ const WEAPON_ICON_MAP = Object.freeze({
   unknown: 'UNK'
 })
 
+const DEFAULT_DEATH_ANIM_DURATION = 1000
+
 function clampNumber(value, min, max, fallback) {
   const number = Number(value)
   if (!Number.isFinite(number)) {
@@ -51,6 +53,25 @@ function safeString(value, fallback, maxLength = 24) {
   const trimmed = value.trim()
   if (!trimmed) return fallback
   return trimmed.slice(0, maxLength)
+}
+
+function normalizeDeathEventData(data = {}) {
+  const playerId = data.playerId || data.targetId || data.targetPlayerId || data.victimId || null
+  const deathTimeRaw = Number(data.deathTime ?? data.deathAt)
+  const deathTime = Number.isFinite(deathTimeRaw) && deathTimeRaw > 0
+    ? deathTimeRaw
+    : Date.now()
+  const durationRaw = Number(data.animDuration ?? data.deathAnimDuration)
+  const animDuration = Number.isFinite(durationRaw) && durationRaw > 0
+    ? durationRaw
+    : DEFAULT_DEATH_ANIM_DURATION
+
+  return {
+    ...data,
+    playerId,
+    deathTime,
+    animDuration
+  }
 }
 
 export function normalizeTeam(team) {
@@ -476,6 +497,42 @@ class MultiplayerClient {
   }
 
   /**
+   * Send buy event to other players
+   * @param {string} itemType - 'weapon' or 'equip'
+   * @param {string} itemId - Weapon or equipment ID
+   */
+  sendBuy(itemType, itemId) {
+    if (this.roomId && this.socket && this.isConnected) {
+      this.socket.emit('buy', {
+        roomId: this.roomId,
+        itemType,
+        itemId,
+        playerName: this.username || 'Player'
+      })
+    }
+  }
+
+  /**
+   * Set callback for buy events from other players
+   * @param {function} callback - Callback function receives { playerId, playerName, itemType, itemId }
+   */
+  onBuy(callback) {
+    if (this.socket) {
+      this.socket.on('buy', callback)
+    }
+  }
+
+  /**
+   * Check if current game state is in freeze time (buy phase)
+   * @returns {boolean}
+   */
+  isInFreezeTime() {
+    // This should be synced with the server's round state
+    // For now, return true if connected and in a room
+    return this.isConnected && this.roomId !== null
+  }
+
+  /**
    * Send hit event (damage dealt to another player)
    */
   sendHit(targetPlayerId, damage, weaponType = 'unknown', extra = {}) {
@@ -524,7 +581,9 @@ class MultiplayerClient {
    */
   onPlayerDied(callback) {
     if (this.socket) {
-      this.socket.on('playerDied', callback)
+      this.socket.on('playerDied', (data = {}) => {
+        callback(normalizeDeathEventData(data))
+      })
     }
   }
 
@@ -534,14 +593,13 @@ class MultiplayerClient {
   onDeath(callback) {
     if (!this.socket) return
 
-    this.socket.on('death', callback)
+    this.socket.on('death', (data = {}) => {
+      callback(normalizeDeathEventData(data))
+    })
 
     // 旧协议兼容
-    this.socket.on('playerDied', (data) => {
-      callback({
-        ...data,
-        playerId: data.playerId || data.targetId || data.targetPlayerId
-      })
+    this.socket.on('playerDied', (data = {}) => {
+      callback(normalizeDeathEventData(data))
     })
   }
 
@@ -878,7 +936,8 @@ class MultiplayerClient {
     this.socket.on('playerDamaged', updateHp)
 
     const onDeath = (data = {}) => {
-      const playerId = data.playerId || data.targetId || data.targetPlayerId
+      const deathEvent = normalizeDeathEventData(data)
+      const playerId = deathEvent.playerId
       if (!playerId || playerId === this.playerId) return
       this.updateRemoteVisualState(playerId, { hp: 0, alive: false })
     }

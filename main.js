@@ -1,5 +1,5 @@
 // Multiplayer imports
-import MultiplayerClient from './multiplayer.js'
+import MultiplayerClient, { TEAM_COLORS as TEAM_VISUALS, normalizeTeam } from './multiplayer.js'
 import {
   clearHealthBars,
   createHealthBar,
@@ -135,6 +135,11 @@ function clamp(v, lo, hi) {
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
+}
+
+function easeOutQuad(t) {
+  const x = clamp01(t)
+  return x * (2 - x)
 }
 
 function mat4Identity() {
@@ -1404,9 +1409,8 @@ class Minimap {
 
     for (const bot of this.game.bots) {
       if (!bot.alive) continue;
-      // 队友显示为绿色，敌人显示为红色
-      const isTeammate = bot.team === this.game.team;
-      const color = isTeammate ? '#4ade80' : '#ff4d4f';
+      const team = normalizeTeam(bot.team)
+      const color = TEAM_VISUALS[team].hex
       this.drawDot(bot.pos, color, 3, bounds);
     }
 
@@ -1438,7 +1442,8 @@ let floatingDamageNumbers = []
 let onlineRespawnTimer = null
 
 const ONLINE_RESPAWN_DELAY_MS = 3000
-const REMOTE_FALL_ANIM_MS = 650
+const REMOTE_FALL_ANIM_MS = 1000
+const remoteDeathAnimHandles = new Map()
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value)
@@ -1450,6 +1455,97 @@ function readSyncedHp(data, fallback = 100) {
   if (typeof data.hp === 'number') return clamp(data.hp, 0, 100)
   if (typeof data.health === 'number') return clamp(data.health, 0, 100)
   return fallback
+}
+
+function normalizeAnimDurationMs(value) {
+  return Math.max(1, safeNumber(value, REMOTE_FALL_ANIM_MS))
+}
+
+function toPerformanceTimestamp(timestampMs, fallback = nowMs()) {
+  const raw = safeNumber(timestampMs, NaN)
+  if (!Number.isFinite(raw) || raw <= 0) return fallback
+
+  let perfStamp = raw
+  if (raw > 1e11 && Number.isFinite(performance.timeOrigin)) {
+    perfStamp = raw - performance.timeOrigin
+  }
+
+  if (!Number.isFinite(perfStamp)) return fallback
+  return Math.max(0, Math.min(nowMs(), perfStamp))
+}
+
+function clearRemoteDeathAnimation(playerId) {
+  const rafId = remoteDeathAnimHandles.get(playerId)
+  if (typeof rafId === 'number') {
+    cancelAnimationFrame(rafId)
+  }
+  remoteDeathAnimHandles.delete(playerId)
+}
+
+function clearAllRemoteDeathAnimations() {
+  for (const playerId of remoteDeathAnimHandles.keys()) {
+    clearRemoteDeathAnimation(playerId)
+  }
+}
+
+function tickRemoteDeathAnimation(playerId) {
+  const playerData = otherPlayers.get(playerId)
+  if (!playerData) {
+    clearRemoteDeathAnimation(playerId)
+    return
+  }
+
+  const deathAt = toPerformanceTimestamp(playerData.deathAt, nowMs())
+  const animDuration = normalizeAnimDurationMs(playerData.animDuration)
+  const elapsed = Math.max(0, nowMs() - deathAt)
+  playerData.fallT = Math.min(1, elapsed / animDuration)
+
+  if (playerData.fallT >= 1) {
+    playerData.fallT = 1
+    playerData.deathHidden = true
+    clearRemoteDeathAnimation(playerId)
+    removeHealthBar(playerId)
+    return
+  }
+
+  const rafId = requestAnimationFrame(() => {
+    tickRemoteDeathAnimation(playerId)
+  })
+  remoteDeathAnimHandles.set(playerId, rafId)
+}
+
+function startRemoteDeathAnimation(playerId, playerData, deathData = {}) {
+  if (!playerId || !playerData) return
+
+  const deathAt = toPerformanceTimestamp(
+    deathData.deathTime ?? deathData.deathAt ?? playerData.deathAt,
+    nowMs()
+  )
+  const animDuration = normalizeAnimDurationMs(
+    deathData.animDuration ?? playerData.animDuration
+  )
+  const sameDeathStamp = Math.abs(safeNumber(playerData.deathAt, 0) - deathAt) < 0.5
+  const hasActiveAnim = remoteDeathAnimHandles.has(playerId)
+  const alreadyAnimating =
+    hasActiveAnim &&
+    playerData.alive === false &&
+    playerData.deathHidden !== true &&
+    safeNumber(playerData.fallT, 0) < 1 &&
+    sameDeathStamp
+  const alreadyHidden = playerData.alive === false && playerData.deathHidden === true && sameDeathStamp
+
+  if (alreadyAnimating || alreadyHidden) return
+
+  playerData.alive = false
+  playerData.hp = 0
+  playerData.deathAt = deathAt
+  playerData.animDuration = animDuration
+  playerData.fallT = 0
+  playerData.deathHidden = false
+
+  clearRemoteDeathAnimation(playerId)
+  console.log('[SFX] Death sound played for player', playerId)
+  tickRemoteDeathAnimation(playerId)
 }
 
 function spawnDamageNumber(worldPos, damage, options = {}) {
@@ -1501,19 +1597,19 @@ function clearOnlineRespawnTimer() {
   }
 }
 
-function markRemotePlayerDead(playerData) {
+function markRemotePlayerDead(playerId, playerData, deathData = null) {
   if (!playerData) return
-  playerData.alive = false
-  playerData.hp = 0
-  if (!playerData.deathAt) {
-    playerData.deathAt = nowMs()
-  }
+  startRemoteDeathAnimation(playerId, playerData, deathData || {})
 }
 
-function markRemotePlayerRespawned(playerData, data = null) {
+function markRemotePlayerRespawned(playerId, playerData, data = null) {
   if (!playerData) return
+  clearRemoteDeathAnimation(playerId)
   playerData.alive = true
   playerData.deathAt = 0
+  playerData.animDuration = REMOTE_FALL_ANIM_MS
+  playerData.fallT = 0
+  playerData.deathHidden = false
   playerData.hp = readSyncedHp(data || playerData, 100)
   if (data && data.position) {
     playerData.position = data.position
@@ -1552,17 +1648,33 @@ function handleDamageEvent(data) {
 
   if (targetId === multiplayer.playerId) {
     const oldHp = game.hp
+    const oldArmor = game.armor
+
     if (typeof syncedHp === 'number') {
       game.hp = clamp(syncedHp, 0, 100)
     } else {
-      game.hp = clamp(game.hp - dmg, 0, 100)
+      // 护甲减伤逻辑
+      let actualDamage = dmg
+      const hasArmor = game.armor > 0
+      if (hasArmor && dmg > 0) {
+        const armorAbsorb = Math.min(game.armor, dmg * 0.3)
+        actualDamage = dmg - armorAbsorb
+        game.armor = Math.max(0, game.armor - armorAbsorb * 0.5)
+      }
+
+      game.hp = clamp(game.hp - actualDamage, 0, 100)
     }
 
     if (game.hp <= 0) {
       handleLocalPlayerDeath('你已阵亡')
     } else if (dmg > 0) {
       const realDamage = Math.max(1, Math.round(oldHp - game.hp))
-      setStatus(`受到伤害 -${realDamage}`, true)
+      const armorUsed = Math.max(0, Math.round(oldArmor - game.armor))
+      if (armorUsed > 0) {
+        setStatus(`受到伤害 -${realDamage} | 护甲 -${armorUsed}`, true)
+      } else {
+        setStatus(`受到伤害 -${realDamage}`, true)
+      }
     }
     return
   }
@@ -1578,10 +1690,17 @@ function handleDamageEvent(data) {
   }
 
   if (playerData.hp <= 0) {
-    markRemotePlayerDead(playerData)
+    markRemotePlayerDead(targetId, playerData, {
+      deathTime: data.deathTime ?? data.deathAt,
+      animDuration: data.animDuration
+    })
   } else {
+    clearRemoteDeathAnimation(targetId)
     playerData.alive = true
     playerData.deathAt = 0
+    playerData.animDuration = REMOTE_FALL_ANIM_MS
+    playerData.fallT = 0
+    playerData.deathHidden = false
   }
 
   if (dmg > 0 && attackerId && attackerId !== multiplayer.playerId) {
@@ -1601,7 +1720,10 @@ function handleDeathEvent(data) {
 
   const playerData = otherPlayers.get(deadId)
   if (!playerData) return
-  markRemotePlayerDead(playerData)
+  markRemotePlayerDead(deadId, playerData, {
+    deathTime: data.deathTime ?? data.deathAt,
+    animDuration: data.animDuration
+  })
 }
 
 function handleRespawnEvent(data) {
@@ -1634,7 +1756,7 @@ function handleRespawnEvent(data) {
 
   const playerData = otherPlayers.get(respawnId)
   if (!playerData) return
-  markRemotePlayerRespawned(playerData, data)
+  markRemotePlayerRespawned(respawnId, playerData, data)
 }
 
 function ensureMinimapActive() {
@@ -1788,7 +1910,15 @@ function refillPlayerLoadoutAmmo() {
 }
 
 function isBuyAllowed() {
-  return game.mode === 'ai' && game.round.state === 'freeze' && game.playerAlive;
+  // 单机模式：冻结期可购买
+  if (game.mode === 'ai') {
+    return game.round.state === 'freeze' && game.playerAlive
+  }
+  // 多人模式：检查是否在冻结期（购买阶段）
+  if (game.mode === 'online' || game.mode === 'multiplayer') {
+    return multiplayer.isConnected && game.playerAlive
+  }
+  return false
 }
 
 function setBuyNotice(text, urgent) {
@@ -1940,6 +2070,11 @@ function tryBuyShopItem(item) {
     setStatus(ok, false);
     setBuyNotice(ok, false);
     renderBuyMenu();
+    
+    // 多人模式：同步购买事件
+    if ((game.mode === 'online' || game.mode === 'multiplayer') && multiplayer.isConnected) {
+      multiplayer.sendBuy('weapon', def.id)
+    }
     return true;
   }
 
@@ -1979,6 +2114,11 @@ function tryBuyShopItem(item) {
   setStatus(ok, false);
   setBuyNotice(ok, false);
   renderBuyMenu();
+  
+  // 多人模式：同步购买事件
+  if ((game.mode === 'online' || game.mode === 'multiplayer') && multiplayer.isConnected) {
+    multiplayer.sendBuy('equip', def.id)
+  }
   return true;
 }
 
@@ -2394,6 +2534,7 @@ function returnToLobby() {
   setOverlayVisible(true);
   showScreen('lobby');
   clearOnlineRespawnTimer()
+  clearAllRemoteDeathAnimations()
   floatingDamageNumbers = []
   clearHealthBars()
   
@@ -2536,6 +2677,8 @@ function startMultiplayerGame(roomId, roomName) {
   
   game.playerAlive = true
   clearOnlineRespawnTimer()
+  clearAllRemoteDeathAnimations()
+  otherPlayers.clear()
   floatingDamageNumbers = []
   closeBuyMenu()
   resetPlayerLoadout()
@@ -2606,8 +2749,10 @@ function setupMultiplayerListeners() {
       const prev = otherPlayers.get(data.playerId) || {}
       const syncedHp = typeof data.hp === 'number' ? clamp(data.hp, 0, 100) : readSyncedHp(prev, 100)
       const alive = typeof data.alive === 'boolean' ? data.alive : syncedHp > 0
-      const deathAt = !alive ? (prev.deathAt || nowMs()) : 0
-      otherPlayers.set(data.playerId, {
+      const deathAt = !alive
+        ? (prev.deathAt || toPerformanceTimestamp(data.deathTime ?? data.deathAt, nowMs()))
+        : 0
+      const nextPlayerState = {
         ...prev,
         position: data.position,
         rotation: data.rotation,
@@ -2618,8 +2763,22 @@ function setupMultiplayerListeners() {
         weapon: data.weapon || prev.weapon || 'rifle',
         alive,
         deathAt,
+        animDuration: normalizeAnimDurationMs(data.animDuration ?? prev.animDuration),
+        fallT: alive ? 0 : clamp01(safeNumber(prev.fallT, 0)),
+        deathHidden: alive ? false : !!prev.deathHidden,
         timestamp: Date.now()
-      })
+      }
+
+      otherPlayers.set(data.playerId, nextPlayerState)
+
+      if (!alive && prev.alive !== false) {
+        startRemoteDeathAnimation(data.playerId, nextPlayerState, {
+          deathTime: data.deathTime ?? data.deathAt,
+          animDuration: data.animDuration
+        })
+      } else if (alive && prev.alive === false) {
+        clearRemoteDeathAnimation(data.playerId)
+      }
     }
   })
   
@@ -2632,6 +2791,7 @@ function setupMultiplayerListeners() {
   // Listen for other players leaving
   multiplayer.onPlayerLeft((data) => {
     console.log(`玩家离开: ${data.username}`)
+    clearRemoteDeathAnimation(data.playerId)
     otherPlayers.delete(data.playerId)
     removeHealthBar(data.playerId)
     setStatus(`${data.username} 离开了游戏`, false)
@@ -2696,18 +2856,32 @@ function setupMultiplayerListeners() {
 
     // 聊天消息监听
     multiplayer.onChat((data) => {
-      module.addChatMessage(data.channel, data.playerName, data.message)
+      module.addChatMessage(data.channel, data.playerName, data.message, data.team)
     })
   })
 
-  // Enter键打开聊天
+  // Y键全局聊天，U键队伍聊天
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && game.mode === 'online' && game.pointerLocked) {
-      e.preventDefault()
-      import('./multiplayer-ui.js').then(module => {
-        module.toggleChatInput(true)
-        exitPointerLock()
-      })
+    if (game.mode === 'online' && game.pointerLocked) {
+      const chatInput = document.getElementById('chatInput')
+
+      // Y键 - 全局聊天
+      if ((e.key === 'y' || e.key === 'Y') && (!chatInput || chatInput.style.display === 'none')) {
+        e.preventDefault()
+        import('./multiplayer-ui.js').then(module => {
+          module.toggleChatInput(true, 'global')
+          exitPointerLock()
+        })
+      }
+
+      // U键 - 队伍聊天
+      if ((e.key === 'u' || e.key === 'U') && (!chatInput || chatInput.style.display === 'none')) {
+        e.preventDefault()
+        import('./multiplayer-ui.js').then(module => {
+          module.toggleChatInput(true, 'team')
+          exitPointerLock()
+        })
+      }
     }
   })
 
@@ -2719,13 +2893,13 @@ function setupMultiplayerListeners() {
     if (e.key === 'Enter') {
       const message = chatInput.value.trim()
       if (message) {
-        // 发送全局聊天（按住 Shift 发送队伍聊天）
-        const channel = e.shiftKey ? 'team' : 'global'
-        multiplayer.sendChat(message, channel)
+        // 获取当前频道（从输入框的 dataset 读取）
+        const currentChannel = module?.getCurrentChatChannel?.() || 'global'
+        multiplayer.sendChat(message, currentChannel)
 
         // 显示自己的消息
         import('./multiplayer-ui.js').then(module => {
-          module.addChatMessage(channel, multiplayer.username, message)
+          module.addChatMessage(currentChannel, multiplayer.username, message, multiplayer.getLocalVisualState().team)
         })
       }
       chatInput.value = ''
@@ -2740,6 +2914,33 @@ function setupMultiplayerListeners() {
       })
       lockPointer()
     }
+  })
+
+  // 购买事件监听
+  multiplayer.onBuy((data) => {
+    if (data.playerId === multiplayer.playerId) return // 忽略自己的购买事件
+
+    const playerName = data.playerName || 'Player'
+    const itemType = data.itemType
+    const itemId = data.itemId
+
+    // 获取物品名称
+    let itemName = itemId
+    if (itemType === 'weapon') {
+      const weaponDef = WEAPON_DEF_BY_ID.get(itemId)
+      if (weaponDef) {
+        itemName = weaponDef.name
+      }
+    } else if (itemType === 'equip') {
+      const equipDef = EQUIPMENT_DEFS[itemId]
+      if (equipDef) {
+        itemName = equipDef.name
+      }
+    }
+
+    // 显示购买提示
+    setStatus(`${playerName} 购买了 ${itemName}`, false)
+    console.log(`[BUY] ${playerName} purchased ${itemName} (${itemType})`)
   })
 }
 
@@ -2857,11 +3058,13 @@ uniform mat4 uProj;
 uniform mat4 uView;
 uniform mat4 uModel;
 uniform vec3 uColor;
+uniform float uOpacity;
 uniform vec3 uLightDir;
 uniform mat4 uLightSpaceMatrix;
 uniform vec3 uViewPos;
 
 out vec3 vColor;
+out float vOpacity;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec4 vFragPosLightSpace;
@@ -2899,6 +3102,7 @@ void main() {
   float lit = (ambient + diffuse + rim) * heightFactor * ao;
 
   vColor = uColor * lit;
+  vOpacity = uOpacity;
   vWorldPos = worldPos.xyz;
   vNormal = n;
   vFragPosLightSpace = uLightSpaceMatrix * worldPos;
@@ -2911,6 +3115,7 @@ const FS = `#version 300 es
 precision highp float;
 
 in vec3 vColor;
+in float vOpacity;
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec4 vFragPosLightSpace;
@@ -2985,7 +3190,7 @@ void main() {
   // 对比度增强（亮部更亮，暗部更暗）
   color = (color - 0.5) * 1.20 + 0.5;  // 对比度倍率 1.20
 
-  fragColor = vec4(color, 1.0);
+  fragColor = vec4(color, clamp(vOpacity, 0.0, 1.0));
 }
 `;
 
@@ -2996,6 +3201,7 @@ const uProj = gl.getUniformLocation(program, 'uProj');
 const uView = gl.getUniformLocation(program, 'uView');
 const uModel = gl.getUniformLocation(program, 'uModel');
 const uColor = gl.getUniformLocation(program, 'uColor');
+const uOpacity = gl.getUniformLocation(program, 'uOpacity');
 const uLightDir = gl.getUniformLocation(program, 'uLightDir');
 const uLightSpaceMatrix = gl.getUniformLocation(program, 'uLightSpaceMatrix');
 const uViewPos = gl.getUniformLocation(program, 'uViewPos');
@@ -3007,6 +3213,7 @@ if (!uProj) missingUniforms.push('uProj');
 if (!uView) missingUniforms.push('uView');
 if (!uModel) missingUniforms.push('uModel');
 if (!uColor) missingUniforms.push('uColor');
+if (!uOpacity) missingUniforms.push('uOpacity');
 if (!uLightDir) missingUniforms.push('uLightDir');
 if (!uLightSpaceMatrix) missingUniforms.push('uLightSpaceMatrix');
 if (!uViewPos) missingUniforms.push('uViewPos');
@@ -3063,6 +3270,8 @@ glsys.cylIndexCount = cylinder.indices.length;
 
 gl.enable(gl.DEPTH_TEST);
 gl.enable(gl.CULL_FACE);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 gl.cullFace(gl.BACK);  // 网格使用 CCW 顶点顺序（正面），剔除背面
 
 // ========== 阴影映射系统 ==========
@@ -3912,10 +4121,15 @@ function updateWeapon(dt) {
   if (game.mode === 'online') {
     // RayCaster 客户端命中检测
     for (const [playerId, playerData] of otherPlayers) {
+      if (!playerData || playerData.deathHidden) continue
+      const hp = readSyncedHp(playerData, 100)
+      if (playerData.alive === false || hp <= 0) continue
+
       // 不攻击队友
       if (playerData.team === game.team) continue
 
       const pos = playerData.position
+      if (!pos) continue
       const playerPos = v3(pos.x, pos.y + 0.9, pos.z) // 中心位置
       const half = v3(0.3, 0.9, 0.3)
       const aabb = aabbFromCenter(playerPos, half)
@@ -3944,7 +4158,17 @@ function updateWeapon(dt) {
   }
 
   if (bestTarget) {
-    const dmg = Math.floor(w.def.damage * bestMult);
+    // 距离衰减伤害计算
+    const distance = v3len(v3sub(roAim, bestTarget.pos || bestTarget.playerData.position))
+    const maxRange = 80 // 最大有效射程
+    const falloffStart = 20 // 开始衰减的距离
+    const falloffMult = distance < falloffStart 
+      ? 1.0 
+      : distance > maxRange 
+        ? 0.1 
+        : 1.0 - ((distance - falloffStart) / (maxRange - falloffStart)) * 0.9
+
+    const dmg = Math.floor(w.def.damage * bestMult * falloffMult)
 
     // 多人模式：发送伤害事件到服务器
     if (bestTarget.type === 'player') {
@@ -4727,7 +4951,17 @@ function updateBots(dt) {
               b.shootCooldown = 0.18;
               continue;
             }
-            game.hp -= bw.damage;
+            // 护甲减伤逻辑
+            const botDamage = bw.damage
+            let actualDamage = botDamage
+            const hasArmor = game.armor > 0
+            if (hasArmor && botDamage > 0) {
+              const armorAbsorb = Math.min(game.armor, botDamage * 0.3)
+              actualDamage = botDamage - armorAbsorb
+              game.armor = Math.max(0, game.armor - armorAbsorb * 0.5)
+            }
+
+            game.hp -= actualDamage;
             if (game.hp <= 0) {
               if (game.mode === 'online') {
                 handleLocalPlayerDeath('You died')
@@ -4812,27 +5046,30 @@ function drawWorld() {
 
   gl.bindVertexArray(glsys.vao);
 
-  function drawBox(pos, scale, color) {
+  function drawBox(pos, scale, color, opacity = 1) {
     mat4FromTranslation(tmpA, pos);
     mat4FromScale(tmpB, scale);
     mat4Mul(model, tmpA, tmpB);
     gl.uniformMatrix4fv(uModel, false, model);
     gl.uniform3f(uColor, color.x, color.y, color.z);
+    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
     gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
   }
 
-  function drawOrientedBox(pos, right, up, forward, scale, color) {
+  function drawOrientedBox(pos, right, up, forward, scale, color, opacity = 1) {
     mat4FromBasisTRS(model, right, up, forward, pos, scale);
     gl.uniformMatrix4fv(uModel, false, model);
     gl.uniform3f(uColor, color.x, color.y, color.z);
+    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
     gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
   }
 
-  function drawOrientedCylinder(pos, right, up, forward, scale, color) {
+  function drawOrientedCylinder(pos, right, up, forward, scale, color, opacity = 1) {
     if (!glsys.cylVao || !glsys.cylIndexCount) return;
     mat4FromBasisTRS(model, right, up, forward, pos, scale);
     gl.uniformMatrix4fv(uModel, false, model);
     gl.uniform3f(uColor, color.x, color.y, color.z);
+    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
     gl.bindVertexArray(glsys.cylVao);
     gl.drawElements(gl.TRIANGLES, glsys.cylIndexCount, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(glsys.vao);
@@ -4887,7 +5124,8 @@ function drawWorld() {
   }
 
   function drawHumanoid(pos, yaw, hp, maxHp, palette, fallT = 0) {
-    const hurt = 1 - clamp01(hp / maxHp);
+    const safeMaxHp = Math.max(1, safeNumber(maxHp, 100))
+    const hurt = 1 - clamp01(safeNumber(hp, 0) / safeMaxHp);
     const baseCol = v3(
       lerp(palette.body.x, palette.hurt.x, hurt),
       lerp(palette.body.y, palette.hurt.y, hurt),
@@ -4895,12 +5133,16 @@ function drawWorld() {
     );
     const up = v3(0, 1, 0);
     const fall = clamp01(fallT || 0);
+    const easedFall = easeOutQuad(fall)
+    const bodyHeight = lerp(1.8, 0.3, easedFall)
+    const heightScale = bodyHeight / 1.8
+    const opacity = 1 - easedFall
     let f = v3norm(forwardFromYawPitch(yaw, 0));
     const r = v3norm(v3cross(up, f));
     let u = v3(0, 1, 0);
 
     if (fall > 0) {
-      const angle = (Math.PI * 0.5) * fall
+      const angle = (Math.PI * 0.5) * easedFall
       const ca = Math.cos(angle)
       const sa = Math.sin(angle)
       const baseU = u
@@ -4909,47 +5151,42 @@ function drawWorld() {
       f = v3norm(v3add(v3scale(baseF, ca), v3scale(baseU, -sa)))
     }
 
-    const base = v3(pos.x, pos.y - 0.68 * fall, pos.z);
-    const hip = v3add(base, v3(0, 0.95, 0));
+    const scaleY = (value) => value * heightScale
+    const base = v3(pos.x, pos.y - 0.68 * easedFall, pos.z);
+    const hip = v3add(base, v3(0, scaleY(0.95), 0));
 
-    drawOrientedBox(v3add(hip, v3(0, 0.25, 0)), r, u, f, v3(0.55, 0.75, 0.3), baseCol);
-    drawOrientedBox(v3add(hip, v3(0, 0.78, 0.02)), r, u, f, v3(0.5, 0.45, 0.32), baseCol);
+    drawOrientedBox(v3add(hip, v3(0, scaleY(0.25), 0)), r, u, f, v3(0.55, 0.75 * heightScale, 0.3), baseCol, opacity);
+    drawOrientedBox(v3add(hip, v3(0, scaleY(0.78), 0.02)), r, u, f, v3(0.5, 0.45 * heightScale, 0.32), baseCol, opacity);
 
     const headCol = palette.head;
-    drawOrientedBox(v3add(hip, v3(0, 1.18, 0.02)), r, u, f, v3(0.32, 0.32, 0.32), headCol);
+    drawOrientedBox(v3add(hip, v3(0, scaleY(1.18), 0.02)), r, u, f, v3(0.32, 0.32 * heightScale, 0.32), headCol, opacity);
 
     const armCol = palette.arm;
-    drawOrientedBox(v3add(hip, v3(0.42, 0.78, 0.02)), r, u, f, v3(0.18, 0.55, 0.18), armCol);
-    drawOrientedBox(v3add(hip, v3(-0.42, 0.78, 0.02)), r, u, f, v3(0.18, 0.55, 0.18), armCol);
+    drawOrientedBox(v3add(hip, v3(0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
+    drawOrientedBox(v3add(hip, v3(-0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
 
     const legCol = palette.leg;
-    drawOrientedBox(v3add(base, v3(0.18, 0.45, 0)), r, u, f, v3(0.22, 0.9, 0.22), legCol);
-    drawOrientedBox(v3add(base, v3(-0.18, 0.45, 0)), r, u, f, v3(0.22, 0.9, 0.22), legCol);
+    drawOrientedBox(v3add(base, v3(0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
+    drawOrientedBox(v3add(base, v3(-0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
 
     const gunCol = palette.gun;
-    drawOrientedBox(v3add(hip, v3(0.18, 0.78, 0.48)), r, u, f, v3(0.16, 0.12, 0.62), gunCol);
+    drawOrientedBox(v3add(hip, v3(0.18, scaleY(0.78), 0.48)), r, u, f, v3(0.16, 0.12 * heightScale, 0.62), gunCol, opacity);
+    return fall >= 1
   }
 
   for (const bot of game.bots) {
     if (!bot.alive) continue;
-    const pal =
-      bot.team === 'ct'
-        ? {
-            body: v3(0.22, 0.38, 0.78),
-            hurt: v3(0.95, 0.22, 0.24),
-            head: v3(0.15, 0.20, 0.30),
-            arm: v3(0.20, 0.30, 0.62),
-            leg: v3(0.16, 0.22, 0.45),
-            gun: v3(0.12, 0.12, 0.14),
-          }
-        : {
-            body: v3(0.80, 0.65, 0.18),
-            hurt: v3(0.95, 0.22, 0.24),
-            head: v3(0.30, 0.24, 0.12),
-            arm: v3(0.60, 0.48, 0.14),
-            leg: v3(0.44, 0.36, 0.12),
-            gun: v3(0.12, 0.12, 0.14),
-          };
+    const team = normalizeTeam(bot.team)
+    const teamColorV3 = TEAM_VISUALS[team].v3
+    const teamColor = v3(teamColorV3.x, teamColorV3.y, teamColorV3.z)
+    const pal = {
+      body: teamColor,
+      hurt: v3(0.95, 0.22, 0.24),
+      head: v3(teamColor.x * 0.55, teamColor.y * 0.55, teamColor.z * 0.55),
+      arm: v3(teamColor.x * 0.8, teamColor.y * 0.8, teamColor.z * 0.8),
+      leg: v3(teamColor.x * 0.6, teamColor.y * 0.6, teamColor.z * 0.6),
+      gun: v3(0.12, 0.12, 0.14),
+    };
     drawHumanoid(bot.pos, bot.yaw, bot.hp, bot.maxHp, pal);
   }
 
@@ -4957,19 +5194,21 @@ function drawWorld() {
   if (game.mode === 'online') {
     for (const [playerId, playerData] of otherPlayers) {
       const pos = playerData.position
-      const rotation = playerData.rotation
+      if (!pos || playerData.deathHidden) {
+        removeHealthBar(playerId)
+        continue
+      }
+      const rotation = playerData.rotation || {}
 
       // 根据阵营设置颜色
-      const teamColor = playerData.team === 'ct'
-        ? v3(0.29, 0.56, 0.89)  // CT 蓝色 #4A90E2
-        : playerData.team === 't'
-        ? v3(0.89, 0.29, 0.29)  // T 红色 #E24A4A
-        : v3(0.5, 0.5, 0.5)     // 默认灰色
+      const team = normalizeTeam(playerData.team)
+      const teamColorV3 = TEAM_VISUALS[team].v3
+      const teamColor = v3(teamColorV3.x, teamColorV3.y, teamColorV3.z)
 
       const pal = {
         body: teamColor,
         hurt: v3(0.95, 0.22, 0.24),
-        head: v3(0.15, 0.20, 0.30),
+        head: v3(teamColor.x * 0.55, teamColor.y * 0.55, teamColor.z * 0.55),
         arm: v3(teamColor.x * 0.8, teamColor.y * 0.8, teamColor.z * 0.8),
         leg: v3(teamColor.x * 0.6, teamColor.y * 0.6, teamColor.z * 0.6),
         gun: v3(0.12, 0.12, 0.14),
@@ -4979,10 +5218,11 @@ function drawWorld() {
       const yaw = rotation.y || 0
       const hp = readSyncedHp(playerData, 100)
       const alive = playerData.alive !== false && hp > 0
-      const deathAt = safeNumber(playerData.deathAt, 0)
-      const fallT = alive ? 0 : clamp01((nowMs() - deathAt) / REMOTE_FALL_ANIM_MS)
-
-      drawHumanoid(
+      const deathAt = toPerformanceTimestamp(playerData.deathAt, nowMs())
+      const animDuration = normalizeAnimDurationMs(playerData.animDuration)
+      const fallbackFallT = clamp01((nowMs() - deathAt) / animDuration)
+      const fallT = alive ? 0 : clamp01(safeNumber(playerData.fallT, fallbackFallT))
+      const canHide = drawHumanoid(
         v3(pos.x, pos.y, pos.z),
         yaw,
         hp,
@@ -4990,17 +5230,13 @@ function drawWorld() {
         pal,
         fallT
       )
+
+      if (!alive && canHide) {
+        playerData.deathHidden = true
+        removeHealthBar(playerId)
+      }
     }
   }
-
-  const playerPalette = {
-    body: v3(0.24, 0.24, 0.42),
-    hurt: v3(0.95, 0.22, 0.24),
-    head: v3(0.18, 0.20, 0.22),
-    arm: v3(0.22, 0.22, 0.38),
-    leg: v3(0.18, 0.18, 0.30),
-    gun: v3(0.12, 0.12, 0.14),
-  };
 
   const w = game.getWeapon();
   const kick = w.kick;
@@ -5222,18 +5458,26 @@ function renderOtherPlayersUI() {
 
   for (const [playerId, playerData] of otherPlayers) {
     const pos = playerData.position
-    if (!pos) {
+    if (!pos || playerData.deathHidden) {
       removeHealthBar(playerId)
       continue
     }
 
     const hp = readSyncedHp(playerData, 100)
     const isAlive = playerData.alive !== false && hp > 0
+    const isDeathAnimating = !isAlive && safeNumber(playerData.fallT, 0) < 1
 
     // 1. 更新血量条（玩家头顶 2.2 米处）
     const healthBarPos = worldToScreen(v3(pos.x, pos.y + 2.2, pos.z))
-    if (healthBarPos && isAlive) {
-      createHealthBar(playerId, healthBarPos.x, healthBarPos.y, hp)
+    if (healthBarPos && (isAlive || isDeathAnimating)) {
+      createHealthBar(
+        playerId,
+        healthBarPos.x,
+        healthBarPos.y,
+        isAlive ? hp : 0,
+        playerData.name,
+        playerData.team
+      )
     } else {
       removeHealthBar(playerId)
     }
@@ -5241,15 +5485,12 @@ function renderOtherPlayersUI() {
     // 2. 绘制阵营标识（血量条上方，2.5 米处）
     const teamPos = worldToScreen(v3(pos.x, pos.y + 2.5, pos.z))
     if (teamPos && isAlive) {
-      // 阵营颜色：CT蓝色 #4A90E2，T红色 #E24A4A
-      const teamColor = playerData.team === 'ct'
-        ? 'rgba(74, 144, 226, 0.9)'   // CT 蓝色
-        : playerData.team === 't'
-        ? 'rgba(226, 74, 74, 0.9)'    // T 红色
-        : 'rgba(128, 128, 128, 0.9)'  // 默认灰色
+      const team = normalizeTeam(playerData.team)
+      const visual = TEAM_VISUALS[team]
+      const teamColor = `rgba(${visual.rgb.r}, ${visual.rgb.g}, ${visual.rgb.b}, 0.9)`
 
       // 绘制阵营标签背景
-      const teamLabel = playerData.team === 'ct' ? 'CT' : playerData.team === 't' ? 'T' : '?'
+      const teamLabel = visual.label
       ctx.font = 'bold 12px sans-serif'
       const labelWidth = ctx.measureText(teamLabel).width + 8
       const labelHeight = 16
