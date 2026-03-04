@@ -307,6 +307,43 @@ body {
   display: none;
 }
 
+/* Radar 系统样式 */
+.radar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  transition: all 0.3s ease;
+}
+
+.radar.hidden {
+  display: none;
+}
+
+.hud--with-radar {
+  /* 为雷达预留空间的HUD调整 */
+}
+
+/* 响应式雷达大小 */
+@media (max-width: 1200px) {
+  .radar {
+    top: 8px;
+    left: 8px;
+  }
+}
+
+@media (max-width: 800px) {
+  .radar {
+    top: 6px;
+    left: 6px;
+    border-radius: 8px;
+  }
+}
+
+
 .alive-counter {
   display: inline-flex;
   align-items: center;

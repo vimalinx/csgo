@@ -2284,6 +2284,7 @@ function handleDamageEvent(data) {
   if (!targetId) return
 
   const attackerId = data.attackerId || data.shooterId || data.fromPlayerId || data.sourcePlayerId
+  const attackerData = attackerId ? otherPlayers.get(attackerId) : null
   const dmg = Math.max(0, Math.floor(safeNumber(data.damage ?? data.amount, 0)))
   const headshot = !!(data.headshot || data.isHeadshot || data.hitZone === 'head')
   const syncedHp = readSyncedHp(data, null)
@@ -2308,7 +2309,12 @@ function handleDamageEvent(data) {
     }
 
     if (game.hp <= 0) {
-      handleLocalPlayerDeath('你已阵亡')
+      // 传递击杀者信息
+      handleLocalPlayerDeath('你已阵亡', {
+        killerId: attackerId,
+        killerName: attackerData?.name || attackerData?.username || 'Unknown',
+        killerTeam: attackerData?.team || ''
+      })
     } else if (dmg > 0) {
       const realDamage = Math.max(1, Math.round(oldHp - game.hp))
       const armorUsed = Math.max(0, Math.round(oldArmor - game.armor))
@@ -2355,8 +2361,15 @@ function handleDeathEvent(data) {
   const deadId = data.playerId || data.targetId || data.targetPlayerId || data.victimId
   if (!deadId) return
 
+  const attackerId = data.attackerId || data.shooterId || data.fromPlayerId || data.sourcePlayerId
+  const attackerData = attackerId ? otherPlayers.get(attackerId) : null
+
   if (deadId === multiplayer.playerId) {
-    handleLocalPlayerDeath('你已阵亡')
+    handleLocalPlayerDeath('你已阵亡', {
+      killerId: attackerId,
+      killerName: attackerData?.name || attackerData?.username || 'Unknown',
+      killerTeam: attackerData?.team || ''
+    })
     return
   }
 
