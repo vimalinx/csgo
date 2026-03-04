@@ -2452,6 +2452,58 @@ function setupMultiplayerListeners() {
       }
     }
   })
+
+  // 聊天系统
+  import('./multiplayer-ui.js').then(module => {
+    module.createChatUI()
+
+    // 聊天消息监听
+    multiplayer.onChat((data) => {
+      module.addChatMessage(data.channel, data.playerName, data.message)
+    })
+  })
+
+  // Enter键打开聊天
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && game.mode === 'online' && game.pointerLocked) {
+      e.preventDefault()
+      import('./multiplayer-ui.js').then(module => {
+        module.toggleChatInput(true)
+        exitPointerLock()
+      })
+    }
+  })
+
+  // 聊天输入监听
+  document.addEventListener('keydown', (e) => {
+    const chatInput = document.getElementById('chatInput')
+    if (!chatInput || chatInput.style.display === 'none') return
+
+    if (e.key === 'Enter') {
+      const message = chatInput.value.trim()
+      if (message) {
+        // 发送全局聊天（按住 Shift 发送队伍聊天）
+        const channel = e.shiftKey ? 'team' : 'global'
+        multiplayer.sendChat(message, channel)
+
+        // 显示自己的消息
+        import('./multiplayer-ui.js').then(module => {
+          module.addChatMessage(channel, multiplayer.username, message)
+        })
+      }
+      chatInput.value = ''
+      import('./multiplayer-ui.js').then(module => {
+        module.toggleChatInput(false)
+      })
+      lockPointer()
+    } else if (e.key === 'Escape') {
+      chatInput.value = ''
+      import('./multiplayer-ui.js').then(module => {
+        module.toggleChatInput(false)
+      })
+      lockPointer()
+    }
+  })
 }
 
 /**
