@@ -1,3 +1,6 @@
+// Event Manager import - 防止内存泄漏
+import { EventManager } from './event-manager.js'
+
 // Multiplayer imports
 import MultiplayerClient, { TEAM_COLORS as TEAM_VISUALS, normalizeTeam } from './multiplayer.js'
 import {
@@ -17,6 +20,10 @@ import { SPECTATOR_MODE, SpectatorManager, SpectatorUI } from './spectator-mode.
 
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
+
+// 创建全局事件管理器 - 统一管理所有事件监听器，防止内存泄漏
+const globalEventManager = new EventManager();
+let frameCount = 0;
 
 const screenLobby = document.getElementById('screenLobby');
 const screenAI = document.getElementById('screenAI');
@@ -3156,26 +3163,6 @@ function updateSmoke(dt) {
   // 兼容旧代码，现在由 updateGrenades 处理
   updateGrenades(dt);
 }
-    game.flashbang.cooldown = Math.max(0, game.flashbang.cooldown - dt);
-  }
-  if (game.smoke.cooldown > 0) {
-    game.smoke.cooldown = Math.max(0, game.smoke.cooldown - dt);
-  }
-
-  const t = nowMs();
-  const keep = [];
-  let changed = false;
-  for (const s of game.smoke.active) {
-    if (t < s.expiresAt) keep.push(s);
-    else changed = true;
-  }
-  if (changed) {
-    game.smoke.active = keep;
-    rebuildGameplayColliders();
-  } else {
-    game.smoke.active = keep;
-  }
-}
 
 function spawnPointCollides(pos) {
   // Player bounding box (approximate: 0.8m wide, 1.8m tall, 0.8m deep)
@@ -4339,30 +4326,44 @@ canvas.addEventListener('click', () => {
   if (!game.pointerLocked && game.mode === 'ai') lockPointer();
 });
 
-document.addEventListener('pointerlockchange', () => {
-  game.pointerLocked = document.pointerLockElement === canvas;
-  setOverlayVisible(!game.pointerLocked);
-  if (!game.pointerLocked && game.mode === 'ai') {
-    closeBuyMenu();
-    if (!game.ending && game.uiScreen !== 'result') {
-      showScreen('pause');
-      setStatus('Paused', false);
+// 使用事件管理器注册 document pointerlockchange - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'pointerlockchange',
+  () => {
+    game.pointerLocked = document.pointerLockElement === canvas;
+    setOverlayVisible(!game.pointerLocked);
+    if (!game.pointerLocked && game.mode === 'ai') {
+      closeBuyMenu();
+      if (!game.ending && game.uiScreen !== 'result') {
+        showScreen('pause');
+        setStatus('Paused', false);
+      }
     }
-  }
-  if (game.pointerLocked) {
-    setStatus('In game', false);
-    if (isBuyAllowed()) openBuyMenu(true);
-  }
-  game.keys.clear();
-  game.mouseDown = false;
-  game.firePressed = false;
-  game.isAiming = false;
-  if (game.pointerLocked) canvas.focus();
-});
+    if (game.pointerLocked) {
+      setStatus('In game', false);
+      if (isBuyAllowed()) openBuyMenu(true);
+    }
+    game.keys.clear();
+    game.mouseDown = false;
+    game.firePressed = false;
+    game.isAiming = false;
+    if (game.pointerLocked) canvas.focus();
+  },
+  {},
+  'document' // 命名空间：document
+);
 
-document.addEventListener('pointerlockerror', () => {
-  setStatus('Pointer lock failed (try click canvas)', true);
-});
+// 使用事件管理器注册 document pointerlockerror - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'pointerlockerror',
+  () => {
+    setStatus('Pointer lock failed (try click canvas)', true);
+  },
+  {},
+  'document' // 命名空间：document
+);
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'F5') {
@@ -4487,7 +4488,9 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && game.pointerLocked) unlockPointer();
 });
 
-window.addEventListener(
+// 使用事件管理器注册 window keydown - 防止内存泄漏
+globalEventManager.add(
+  window,
   'keydown',
   (e) => {
     if (!(game.pointerLocked || game.mode === 'ai')) return;
@@ -4512,75 +4515,104 @@ window.addEventListener(
       }
     }
   },
-  true
+  { capture: true },
+  'window' // 命名空间：window
 );
 
 
-document.addEventListener('keyup', (e) => {
-  game.keys.delete(e.code);
-});
+// 使用事件管理器注册 document keyup - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'keyup',
+  (e) => {
+    game.keys.delete(e.code);
+  },
+  {},
+  'document' // 命名空间：document
+);
 
-document.addEventListener('mousedown', (e) => {
-  if (!game.pointerLocked) return;
-  if (e.button === 0) {
-    if (game.currentEquip === 'flash') {
-      game.mouseDown = false;
-      game.firePressed = false;
-      deployFlashbang();
+// 使用事件管理器注册 document mousedown - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'mousedown',
+  (e) => {
+    if (!game.pointerLocked) return;
+    if (e.button === 0) {
+      if (game.currentEquip === 'flash') {
+        game.mouseDown = false;
+        game.firePressed = false;
+        deployFlashbang();
+        return;
+      }
+      if (game.currentEquip === 'smoke') {
+        game.mouseDown = false;
+        game.firePressed = false;
+        deploySmokeWall();
+        return;
+      }
+      if (game.currentEquip === 'molotov') {
+        game.mouseDown = false;
+        game.firePressed = false;
+        deployMolotov();
+        return;
+      }
+      game.mouseDown = true;
+      game.firePressed = true;
       return;
     }
-    if (game.currentEquip === 'smoke') {
-      game.mouseDown = false;
-      game.firePressed = false;
-      deploySmokeWall();
-      return;
+    if (e.button === 2) {
+      const w = game.getWeapon();
+      if (!w) return;
+      if (w.def.category === 'sniper') {
+        e.preventDefault();
+        // 开镜
+        game.isAiming = true;
+        game.scope.active = true;
+        game.scope.targetZoom = w.def.zoomLevel || 4;
+        game.scope.transitioning = true;
+        return;
+      }
+      if (w.def.category === 'pistol') {
+        e.preventDefault();
+        w.silencerOn = !w.silencerOn;
+        setStatus(`Silencer: ${w.silencerOn ? 'ON' : 'OFF'}`, false);
+      }
     }
-    if (game.currentEquip === 'molotov') {
-      game.mouseDown = false;
-      game.firePressed = false;
-      deployMolotov();
-      return;
-    }
-    game.mouseDown = true;
-    game.firePressed = true;
-    return;
-  }
-  if (e.button === 2) {
-    const w = game.getWeapon();
-    if (!w) return;
-    if (w.def.category === 'sniper') {
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+// 使用事件管理器注册 document mouseup - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'mouseup',
+  (e) => {
+    if (e.button === 0) game.mouseDown = false;
+    if (e.button === 2) {
       e.preventDefault();
-      // 开镜
-      game.isAiming = true;
-      game.scope.active = true;
-      game.scope.targetZoom = w.def.zoomLevel || 4;
+      // 关镜
+      game.isAiming = false;
+      game.scope.active = false;
+      game.scope.targetZoom = 1;
       game.scope.transitioning = true;
-      return;
     }
-    if (w.def.category === 'pistol') {
-      e.preventDefault();
-      w.silencerOn = !w.silencerOn;
-      setStatus(`Silencer: ${w.silencerOn ? 'ON' : 'OFF'}`, false);
-    }
-  }
-});
+  },
+  {},
+  'document' // 命名空间：document
+);
 
-document.addEventListener('mouseup', (e) => {
-  if (e.button === 0) game.mouseDown = false;
-  if (e.button === 2) {
+// 使用事件管理器注册 document contextmenu - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'contextmenu',
+  (e) => {
+    if (!game.pointerLocked) return;
     e.preventDefault();
-    // 关镜
-    game.isAiming = false;
-    game.scope.active = false;
-    game.scope.targetZoom = 1;
-    game.scope.transitioning = true;
-  }
-});
-
-document.addEventListener('contextmenu', (e) => {
-  if (!game.pointerLocked) return;
-  e.preventDefault();
-});
+  },
+  {},
+  'document' // 命名空间：document
+);
 
 const SWIPE_MIN_DISTANCE = 56;
 const SWIPE_MAX_VERTICAL_DRIFT = 72;
@@ -4612,17 +4644,24 @@ overlay.addEventListener(
   { passive: true }
 );
 
-window.addEventListener('blur', () => {
-  game.keys.clear();
-  game.mouseDown = false;
-  game.firePressed = false;
-  game.isAiming = false;
-  game.scope.active = false;
-  game.scope.targetZoom = 1;
-  game.scope.transitioning = true;
-  game.mouseDX = 0;
-  game.mouseDY = 0;
-});
+// 使用事件管理器注册 window blur - 防止内存泄漏
+globalEventManager.add(
+  window,
+  'blur',
+  () => {
+    game.keys.clear();
+    game.mouseDown = false;
+    game.firePressed = false;
+    game.isAiming = false;
+    game.scope.active = false;
+    game.scope.targetZoom = 1;
+    game.scope.transitioning = true;
+    game.mouseDX = 0;
+    game.mouseDY = 0;
+  },
+  {},
+  'window' // 命名空间：window
+);
 
 btnModeAI.addEventListener('click', () => {
   showScreen('ai');
@@ -6722,6 +6761,7 @@ let last = nowMs();
 function frame() {
   const t = nowMs();
   let dt = (t - last) / 1000;
+  frameCount++;
   last = t;
   dt = Math.min(0.033, Math.max(0, dt));
   const aiRunning = game.mode === 'ai' && game.uiScreen === 'ai' && !game.ending;
