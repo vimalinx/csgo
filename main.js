@@ -407,13 +407,6 @@ const collisionPerf = {
   earlyExits: 0
 };
 
-function resetCollisionPerf() {
-  collisionPerf.rayCasts = 0;
-  collisionPerf.broadPhaseCandidates = 0;
-  collisionPerf.narrowPhaseTests = 0;
-  collisionPerf.earlyExits = 0;
-}
-
 // Hitzone configuration (CS:GO standard damage multipliers)
 const HITZONE_CONFIG = {
   head: { mult: 4.0, priority: 1 },
@@ -754,18 +747,6 @@ function buildCylinderMesh(segments = 18) {
 function makeBox(pos, scale, color, solid) {
   const half = v3(scale.x * 0.5, scale.y * 0.5, scale.z * 0.5);
   return { pos, scale, color, solid, aabb: aabbFromCenter(pos, half) };
-}
-
-function makeTarget(id, pos) {
-  return {
-    id,
-    pos,
-    half: v3(0.35, 0.9, 0.35),
-    hp: 100,
-    maxHp: 100,
-    alive: true,
-    respawnAt: 0,
-  };
 }
 
 /**
@@ -2117,12 +2098,6 @@ const lastHudValues = {
   tAlive: -1
 };
 
-// 标记HUD需要更新
-function markHudDirty(flag) {
-  if (flag) hudDirtyFlags[flag] = true;
-  else Object.keys(hudDirtyFlags).forEach(k => hudDirtyFlags[k] = true);
-}
-
 // ========== 性能监控系统 ==========
 const gamePerformance = {
   // FPS 计算
@@ -2187,23 +2162,6 @@ const gamePerformance = {
 // 向量计算缓存（LRU策略）
 const vectorCache = new Map();
 const VECTOR_CACHE_MAX_SIZE = 500;
-
-function cachedV3Norm(v) {
-  const key = `${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}`;
-  if (vectorCache.has(key)) {
-    return vectorCache.get(key);
-  }
-  const result = v3norm(v);
-  vectorCache.set(key, result);
-  
-  // LRU：超过限制时删除最旧的
-  if (vectorCache.size > VECTOR_CACHE_MAX_SIZE) {
-    const firstKey = vectorCache.keys().next().value;
-    vectorCache.delete(firstKey);
-  }
-  
-  return result;
-}
 
 // 更新函数节流控制
 let lastBotUpdateTime = 0;
@@ -3142,12 +3100,6 @@ function applyDifficultyToBots() {
     b.weapon.damage = dmg;
     b.reactionTime = reactionTime;
     b.firstSawEnemyTime = null; // 反应时间追踪
-  }
-}
-
-function applyTeamToBots() {
-  for (const b of game.bots) {
-    b.team = b.id <= 5 ? 'ct' : 't';
   }
 }
 
@@ -4142,14 +4094,6 @@ function sendPlayerMovement() {
 
 function recordFireTime() {
   lastFireTime = Date.now()
-}
-
-function resetNetworkSync() {
-  lastMoveSendTime = 0
-  lastSyncPos = null
-  lastSyncYaw = 0
-  lastSyncPitch = 0
-  lastFireTime = 0
 }
 
 const glsys = new GL(canvas);
