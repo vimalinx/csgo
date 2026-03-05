@@ -3776,7 +3776,7 @@ function setupMultiplayerListeners() {
       })
       lockPointer()
     }
-  })
+  }, {}, 'online')
 
   // 购买事件监听
   multiplayer.onBuy((data) => {
