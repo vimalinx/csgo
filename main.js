@@ -2259,9 +2259,11 @@ function initBotWorker() {
 function applyBotUpdateResults(result) {
   const { bots, events } = result;
   
-  // 性能监控（每 60 帧输出一次）
-  if (workerPerformanceMonitor.frameCount % 60 === 0) {
-    console.log(`[Worker 性能] Worker: ${workerPerformanceMonitor.workerTime.toFixed(2)}ms, 主线程: ${workerPerformanceMonitor.mainThreadTime.toFixed(2)}ms`);
+  // 更新性能监控显示
+  const workerPerfEl = document.getElementById('workerPerf');
+  if (workerPerfEl) {
+    workerPerfEl.style.display = 'block';
+    workerPerfEl.textContent = `Worker: ${workerPerformanceMonitor.workerTime.toFixed(2)}ms | 主线程: ${workerPerformanceMonitor.mainThreadTime.toFixed(2)}ms`;
   }
   
   // 更新 bot 状态
