@@ -1662,7 +1662,7 @@ const WEAPON_DEFS = [
     slot: 'primary',
     kind: 2,
     auto: true,
-    price: 2350,
+    price: 2450, // 2350→2450 平衡性微调：P90 弹匣大射速快，上调价格
     rpm: 880,
     damage: 22,
     spreadDeg: 3.4,
@@ -1703,7 +1703,7 @@ const WEAPON_DEFS = [
     slot: 'primary',
     kind: 3,
     auto: false,
-    price: 1700,
+    price: 1800, // 1700→1800 平衡性微调：Scout 性价比过高，上调价格
     rpm: 78,
     damage: 75,
     spreadDeg: 0.42,
@@ -1835,6 +1835,9 @@ class Game {
     this.aliveBotsCacheDirty = true;
     this.shells = [];
     this.tracers = [];
+    // 对象池（减少GC压力）
+    this.shellPool = [];
+    this.tracerPool = [];
     this.hitmarker = { t: 0, head: false };
     this.buyMenuOpen = false;
     this.buyNotice = '';
@@ -2968,20 +2971,25 @@ function applyDifficultyToBots() {
   let rpm = 200;
   let spreadDeg = 3.2;
   let dmg = 4;
+  let reactionTime = 300; // Easy: 220~320ms
   if (d === 'normal') {
     rpm = 240;
     spreadDeg = 2.2;
     dmg = 5;
+    reactionTime = 180; // Normal: 140~220ms
   }
   if (d === 'hard') {
     rpm = 300;
     spreadDeg = 1.7;
     dmg = 6;
+    reactionTime = 110; // Hard: 80~140ms
   }
   for (const b of game.bots) {
     b.weapon.rpm = rpm;
     b.weapon.spreadDeg = spreadDeg;
     b.weapon.damage = dmg;
+    b.reactionTime = reactionTime;
+    b.firstSawEnemyTime = null; // 反应时间追踪
   }
 }
 
@@ -5960,6 +5968,21 @@ function updateBots(dt) {
     const shouldChase = dist < 18 && !occluded;
     b.state = shouldChase ? 'chase' : 'patrol';
 
+    // 反应时间逻辑：让 Bot 行为更像人类
+    const hasValidTarget = shouldChase && targetType !== 'site';
+    if (hasValidTarget && b.firstSawEnemyTime === null) {
+      // 首次发现敌人，记录时间戳
+      b.firstSawEnemyTime = tNow;
+    }
+    if (!hasValidTarget) {
+      // 目标丢失，重置反应时间状态
+      b.firstSawEnemyTime = null;
+    }
+    // 计算是否可以开火（带随机抖动 0.7~1.3 倍）
+    const reactionTime = b.reactionTime || 180;
+    const actualReactionTime = reactionTime * (0.7 + Math.random() * 0.6);
+    const canShoot = b.firstSawEnemyTime !== null && (tNow - b.firstSawEnemyTime) >= actualReactionTime;
+
     let wish = v3(0, 0, 0);
     if (b.state === 'chase') {
       // 追逐模式：使用 A* 寻路追踪目标
@@ -6041,7 +6064,7 @@ function updateBots(dt) {
       game.round.ctDefusing = true;
     }
 
-    if (shouldChase && dist < 24 && !occluded && b.shootCooldown <= 0 && targetType !== 'site') {
+    if (shouldChase && dist < 24 && !occluded && b.shootCooldown <= 0 && targetType !== 'site' && canShoot) {
       if (!bw.reloading && bw.mag <= 0) {
         bw.reloading = true;
         bw.reloadTotal = bw.reloadSec;
@@ -6142,6 +6165,163 @@ function updateBots(dt) {
     }
   }
 
+}
+
+// ========== 视锥裁剪系统（Frustum Culling）==========
+
+/**
+ * 从视图投影矩阵创建视锥裁剪器
+ * @param {number[]} viewProj - 4x4视图投影矩阵
+ * @returns {object} 裁剪器对象，包含6个裁剪平面
+ */
+function makeFrustumCuller(viewProj) {
+  const planes = [];
+  
+  // 提取6个裁剪平面（左、右、下、上、近、远）
+  // 每个平面表示为 { normal: v3, distance: number }
+  
+  // 左平面
+  planes.push({
+    normal: v3(
+      viewProj[3] + viewProj[0],
+      viewProj[7] + viewProj[4],
+      viewProj[11] + viewProj[8]
+    ),
+    distance: viewProj[15] + viewProj[12]
+  });
+  
+  // 右平面
+  planes.push({
+    normal: v3(
+      viewProj[3] - viewProj[0],
+      viewProj[7] - viewProj[4],
+      viewProj[11] - viewProj[8]
+    ),
+    distance: viewProj[15] - viewProj[12]
+  });
+  
+  // 下平面
+  planes.push({
+    normal: v3(
+      viewProj[3] + viewProj[1],
+      viewProj[7] + viewProj[5],
+      viewProj[11] + viewProj[9]
+    ),
+    distance: viewProj[15] + viewProj[13]
+  });
+  
+  // 上平面
+  planes.push({
+    normal: v3(
+      viewProj[3] - viewProj[1],
+      viewProj[7] - viewProj[5],
+      viewProj[11] - viewProj[9]
+    ),
+    distance: viewProj[15] - viewProj[13]
+  });
+  
+  // 近平面
+  planes.push({
+    normal: v3(
+      viewProj[3] + viewProj[2],
+      viewProj[7] + viewProj[6],
+      viewProj[11] + viewProj[10]
+    ),
+    distance: viewProj[15] + viewProj[14]
+  });
+  
+  // 远平面
+  planes.push({
+    normal: v3(
+      viewProj[3] - viewProj[2],
+      viewProj[7] - viewProj[6],
+      viewProj[11] - viewProj[10]
+    ),
+    distance: viewProj[15] - viewProj[14]
+  });
+  
+  // 归一化平面法向量
+  for (const plane of planes) {
+    const len = v3len(plane.normal);
+    if (len > 0.0001) {
+      plane.normal = v3scale(plane.normal, 1 / len);
+      plane.distance /= len;
+    }
+  }
+  
+  return { planes };
+}
+
+/**
+ * 测试球体是否在视锥内
+ * @param {object} culler - 裁剪器对象
+ * @param {{x: number, y: number, z: number}} center - 球心
+ * @param {number} radius - 球半径
+ * @returns {boolean} 是否可见
+ */
+function isSphereVisible(culler, center, radius) {
+  const p = center;
+  const r = radius;
+  
+  for (const plane of culler.planes) {
+    // 计算球心到平面的距离
+    const dist = plane.normal.x * p.x + plane.normal.y * p.y + plane.normal.z * p.z + plane.distance;
+    
+    // 如果距离小于负半径，球体完全在平面外侧，不可见
+    if (dist < -r) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * 测试线段是否在视锥内（保守估计）
+ * @param {object} culler - 裁剪器对象
+ * @param {{x: number, y: number, z: number}} start - 线段起点
+ * @param {{x: number, y: number, z: number}} end - 线段终点
+ * @returns {boolean} 是否可见
+ */
+function isSegmentVisible(culler, start, end) {
+  // 使用保守策略：测试两端点和中点
+  // 如果任一点可见，则整个线段可见
+  const mid = v3scale(v3add(start, end), 0.5);
+  
+  // 使用很小的半径进行点测试
+  return isSphereVisible(culler, start, 0.01) ||
+         isSphereVisible(culler, end, 0.01) ||
+         isSphereVisible(culler, mid, 0.01);
+}
+
+// ========== 对象池化系统（Object Pooling）==========
+
+/**
+ * 从对象池获取弹壳对象
+ */
+function obtainShell() {
+  return game.shellPool.pop() || {};
+}
+
+/**
+ * 回收弹壳对象到对象池
+ */
+function recycleShell(shell) {
+  game.shellPool.push(shell);
+}
+
+/**
+ * 从对象池获取曳光弹对象
+ */
+function obtainTracer() {
+  return game.tracerPool.pop() || {};
+}
+
+/**
+ * 回收曳光弹对象到对象池
+ */
+function recycleTracer(tracer) {
+  game.tracerPool.push(tracer);
 }
 
 function drawWorld() {
