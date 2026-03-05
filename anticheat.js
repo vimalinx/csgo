@@ -412,7 +412,8 @@ class RecoilPatternValidator {
             const dy = expected[i].y - actual[i].y;
             totalDeviation += Math.sqrt(dx * dx + dy * dy);
         }
-        return totalDeviation / len;
+        // 除零保护：如果 len 为 0，返回 0
+        return len > 0 ? totalDeviation / len : 0;
     }
 }
 
