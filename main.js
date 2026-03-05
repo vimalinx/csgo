@@ -5342,14 +5342,14 @@ function updateWeapon(dt) {
 
   const endAim = bestT < Infinity ? v3add(roAim, v3scale(rdAim, Math.min(bestT, 80))) : v3add(roAim, v3scale(rdAim, 80));
   const endTrace = endAim;
-  game.tracers.push({
-    a: roTrace,
-    b: endTrace,
-    travel: 0,
-    speed: 110,
-    life: 0.32,
-    hue: 0.55,
-  });
+  const tracer = obtainTracer();
+  tracer.a = roTrace;
+  tracer.b = endTrace;
+  tracer.travel = 0;
+  tracer.speed = 110;
+  tracer.life = 0.32;
+  tracer.hue = 0.55;
+  game.tracers.push(tracer);
 
   const shellPos = v3add(
     camPos,
@@ -5359,7 +5359,11 @@ function updateWeapon(dt) {
   const uv = 1.6 + Math.random() * 1.0;
   const fv = 0.8 + Math.random() * 0.7;
   const shellVel = v3add(v3scale(rightCam, rv), v3add(v3scale(camUp, uv), v3scale(fwdCam, fv)));
-  game.shells.push({ pos: shellPos, vel: shellVel, life: 1.6 });
+  const shell = obtainShell();
+  shell.pos = shellPos;
+  shell.vel = shellVel;
+  shell.life = 1.6;
+  game.shells.push(shell);
 }
 
 function updateShells(dt) {
@@ -5375,7 +5379,13 @@ function updateShells(dt) {
     }
     s.life -= dt;
   }
-  game.shells = game.shells.filter((s) => s.life > 0);
+  // 原地移除死亡弹壳并回收到对象池
+  for (let i = game.shells.length - 1; i >= 0; i--) {
+    if (game.shells[i].life <= 0) {
+      recycleShell(game.shells[i]);
+      game.shells.splice(i, 1);
+    }
+  }
 }
 
 function updateTracers(dt) {
@@ -5383,7 +5393,13 @@ function updateTracers(dt) {
     t.life -= dt;
     t.travel = Math.min(1, (t.travel || 0) + dt * (t.speed || 120) / Math.max(0.001, v3len(v3sub(t.b, t.a))));
   }
-  game.tracers = game.tracers.filter((t) => t.life > 0);
+  // 原地移除死亡曳光弹并回收到对象池
+  for (let i = game.tracers.length - 1; i >= 0; i--) {
+    if (game.tracers[i].life <= 0) {
+      recycleTracer(game.tracers[i]);
+      game.tracers.splice(i, 1);
+    }
+  }
 }
 
 function updateHitmarker(dt) {
@@ -6112,7 +6128,14 @@ function updateBots(dt) {
           continue;
         }
 
-        game.tracers.push({ a: muzzle, b: end, travel: 0, speed: 95, life: 0.32, hue: 0.02 });
+        const botTracer = obtainTracer();
+        botTracer.a = muzzle;
+        botTracer.b = end;
+        botTracer.travel = 0;
+        botTracer.speed = 95;
+        botTracer.life = 0.32;
+        botTracer.hue = 0.02;
+        game.tracers.push(botTracer);
 
         const hitChance = clamp01((26 - dist) / 26);
         if (Math.random() < 0.02 + 0.11 * hitChance) {
@@ -6359,6 +6382,10 @@ function drawWorld() {
   }
   mat4LookAt(view, camPos, camTarget, v3(0, 1, 0));
 
+  // 创建视锥裁剪器（用于剔除不可见物体）
+  const viewProj = mat4Mul(mat4Identity(), proj, view);
+  const culler = makeFrustumCuller(viewProj);
+
   const tSky = nowMs() * 0.00005;
   // 更鲜明的天蓝色天空
   const skyA = v3(0.55, 0.82, 0.94);  // 天蓝色
@@ -6426,37 +6453,62 @@ function drawWorld() {
     drawOrientedBox(mid, r, u, f, v3(0.009, 0.009, len), color);
   }
 
-  for (const b of game.boxes) drawBox(b.pos, b.scale, b.color);
+  // 地图盒体（使用视锥裁剪）
+  for (const b of game.boxes) {
+    // 使用盒体的最大尺寸作为包围球半径
+    const radius = Math.max(b.scale.x, b.scale.y, b.scale.z) * 1.5;
+    if (isSphereVisible(culler, b.pos, radius)) {
+      drawBox(b.pos, b.scale, b.color);
+    }
+  }
 
+  // 云层（使用视锥裁剪）
   for (let i = 0; i < 22; i++) {
     const x = -game.mapBounds + ((i * 9) % (game.mapBounds * 2));
     const z = -game.mapBounds + ((i * 13) % (game.mapBounds * 2));
     const y = 10.5 + Math.sin(tSky + i) * 0.25;
     const puff = 1.2 + ((i % 3) * 0.45);
-    const c = v3(0.96, 0.98, 1.0);
-    drawBox(v3(x, y, z), v3(3.6 * puff, 0.6, 2.2 * puff), c);
+    const cloudPos = v3(x, y, z);
+    const cloudRadius = Math.max(3.6 * puff, 2.2 * puff);
+    if (isSphereVisible(culler, cloudPos, cloudRadius)) {
+      const c = v3(0.96, 0.98, 1.0);
+      drawBox(cloudPos, v3(3.6 * puff, 0.6, 2.2 * puff), c);
+    }
   }
 
   if (game.mode === 'ai') {
     const planted = game.round.bombPlanted;
+    // Bomb sites（使用视锥裁剪）
     for (const site of game.round.sites) {
-      const active = site.key === game.round.activeSite;
-      const plantedHere = site.key === game.round.plantSite;
-      const neutral = v3(0.92, 0.94, 0.98);
-      const activeCol = site.key === 'A' ? v3(0.60, 0.75, 1.0) : v3(0.95, 0.80, 0.55);
-      const plantedCol = v3(1.0, 0.55, 0.40);
-      const padCol = plantedHere ? plantedCol : active ? activeCol : neutral;
-      drawBox(v3(site.pos.x, site.pos.y, site.pos.z), v3(1.8, 0.06, 1.8), padCol);
+      const sitePos = v3(site.pos.x, site.pos.y, site.pos.z);
+      if (isSphereVisible(culler, sitePos, 2.5)) {
+        const active = site.key === game.round.activeSite;
+        const plantedHere = site.key === game.round.plantSite;
+        const neutral = v3(0.92, 0.94, 0.98);
+        const activeCol = site.key === 'A' ? v3(0.60, 0.75, 1.0) : v3(0.95, 0.80, 0.55);
+        const plantedCol = v3(1.0, 0.55, 0.40);
+        const padCol = plantedHere ? plantedCol : active ? activeCol : neutral;
+        drawBox(sitePos, v3(1.8, 0.06, 1.8), padCol);
+      }
     }
+    // Bomb（使用视锥裁剪）
     if (planted) {
-      drawBox(v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z), v3(0.22, 0.16, 0.36), v3(1.0, 0.30, 0.20));
+      const bombPos = v3(game.round.bombPos.x, game.round.bombPos.y + 0.12, game.round.bombPos.z);
+      if (isSphereVisible(culler, bombPos, 0.5)) {
+        drawBox(bombPos, v3(0.22, 0.16, 0.36), v3(1.0, 0.30, 0.20));
+      }
     }
   }
 
+  // AI 烟雾（使用视锥裁剪）
   if (game.mode === 'ai' && game.smoke.active.length > 0) {
     for (const s of game.smoke.active) {
-      drawBox(v3(s.pos.x, s.pos.y, s.pos.z), v3(s.scale.x, s.scale.y, s.scale.z), v3(0.62, 0.66, 0.72));
-      drawBox(v3(s.pos.x, s.pos.y + 0.95, s.pos.z), v3(s.scale.x * 0.7, s.scale.y * 0.6, s.scale.z * 0.7), v3(0.78, 0.8, 0.84));
+      const smokePos = v3(s.pos.x, s.pos.y, s.pos.z);
+      const smokeRadius = Math.max(s.scale.x, s.scale.y, s.scale.z);
+      if (isSphereVisible(culler, smokePos, smokeRadius)) {
+        drawBox(smokePos, v3(s.scale.x, s.scale.y, s.scale.z), v3(0.62, 0.66, 0.72));
+        drawBox(v3(s.pos.x, s.pos.y + 0.95, s.pos.z), v3(s.scale.x * 0.7, s.scale.y * 0.6, s.scale.z * 0.7), v3(0.78, 0.8, 0.84));
+      }
     }
   }
 
@@ -6513,6 +6565,10 @@ function drawWorld() {
 
   for (const bot of game.bots) {
     if (!bot.alive) continue;
+    // Bot 模型（使用视锥裁剪）
+    const botPos = bot.pos;
+    if (!isSphereVisible(culler, v3(botPos.x, botPos.y + 0.9, botPos.z), 1.2)) continue;
+    
     const team = normalizeTeam(bot.team)
     const teamColorV3 = TEAM_VISUALS[team].v3
     const teamColor = v3(teamColorV3.x, teamColorV3.y, teamColorV3.z)
@@ -6535,6 +6591,11 @@ function drawWorld() {
         removeHealthBar(playerId)
         continue
       }
+      
+      // 在线玩家模型（使用视锥裁剪）
+      const playerPos = v3(pos.x, pos.y + 0.9, pos.z);
+      if (!isSphereVisible(culler, playerPos, 1.2)) continue;
+      
       const rotation = playerData.rotation || {}
 
       // 根据阵营设置颜色
@@ -6584,8 +6645,10 @@ function drawWorld() {
     const camRight = v3norm(v3cross(worldUp, fwd));
     const camUp = v3norm(v3cross(fwd, camRight));
 
-    // 继续渲染弹壳和曳光弹
+    // 继续渲染弹壳和曳光弹（使用视锥裁剪）
     for (const s of game.shells) {
+      // 弹壳裁剪测试
+      if (!isSphereVisible(culler, s.pos, 0.2)) continue;
       const c = v3(0.65, 0.55, 0.2);
       drawBox(s.pos, v3(0.06, 0.04, 0.1), c);
     }
@@ -6606,6 +6669,10 @@ function drawWorld() {
         const f = v3scale(dir, 1 / L);
         const tip = v3add(t.a, v3scale(f, L * travel));
         const tail = v3add(tip, v3scale(f, -Math.min(segLen, L * travel)));
+        
+        // 曳光弹线段裁剪测试
+        if (!isSegmentVisible(culler, tail, tip)) continue;
+        
         drawTracer(tail, tip, baseCol);
 
         if ((t.hue || 0.55) >= 0.1) {
@@ -6778,11 +6845,14 @@ function drawWorld() {
     hand
   );
 
+  // 弹壳绘制（使用视锥裁剪）
   for (const s of game.shells) {
+    if (!isSphereVisible(culler, s.pos, 0.2)) continue;
     const c = v3(0.65, 0.55, 0.2);
     drawBox(s.pos, v3(0.06, 0.04, 0.1), c);
   }
 
+  // 曳光弹绘制（使用视锥裁剪）
   for (const t of game.tracers) {
     const k = clamp01(t.life / 0.32);
     const hue = t.hue || 0.55;
@@ -6799,6 +6869,10 @@ function drawWorld() {
       const f = v3scale(dir, 1 / L);
       const tip = v3add(t.a, v3scale(f, L * travel));
       const tail = v3add(tip, v3scale(f, -Math.min(segLen, L * travel)));
+      
+      // 曳光弹线段裁剪测试
+      if (!isSegmentVisible(culler, tail, tip)) continue;
+      
       drawTracer(tail, tip, baseCol);
 
       if ((t.hue || 0.55) >= 0.1) {

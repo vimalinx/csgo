@@ -1,0 +1,43 @@
+任务2：为 anticheat.js 添加违规计数器时间衰减机制
+
+**要求**：
+1. 在 ANTI_CHEAT_CONFIG 中添加衰减配置：
+   ```javascript
+   VIOLATION_DECAY: {
+     enabled: true,
+     decayInterval: 60000,    // 每60秒衰减一次
+     decayRate: 0.5           // 每次衰减50%
+   }
+   ```
+
+2. 实现违规计数器的时间衰减逻辑：
+   - 创建一个 ViolationManager 类来统一管理违规计数
+   - 实现定时衰减机制：每隔 decayInterval 毫秒，所有玩家的违规计数 *= decayRate
+   - 当违规计数小于 1 时，清零
+
+3. 在 SpeedLimiter、PositionValidator、ShootValidator 中集成衰减：
+   - 修改这三个类的 constructor，接收 ViolationManager 实例
+   - 修改记录违规的逻辑，使用 ViolationManager 来统一记录和管理
+
+4. 添加定期清理过期记录的机制：
+   - 在 ViolationManager 中实现 cleanupExpiredRecords 方法
+   - 清理超过一定时间（例如 5 分钟）没有新违规的玩家记录
+   - 每次衰减时也执行清理
+
+5. 添加日志记录：
+   - 记录衰减操作（哪些玩家、衰减前后的计数）
+   - 记录清理操作（清理了哪些玩家）
+
+**实现位置**：
+- 在 ANTI_CHEAT_CONFIG 中添加 VIOLATION_DECAY 配置
+- 创建 ViolationManager 类（在 ShootValidator 类后面）
+- 修改 SpeedLimiter、PositionValidator、ShootValidator 类
+- 修改 AntiCheatSystem 类，初始化 ViolationManager
+
+**验证要求**：
+- 代码语法正确
+- 不引入新的 bug
+- 功能逻辑正确
+- 衰减和清理机制正常工作
+
+完成后 git commit，提交信息：feat(anticheat): 违规计数器时间衰减机制
