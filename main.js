@@ -3685,7 +3685,7 @@ function setupMultiplayerListeners() {
       const message = chatInput.value.trim()
       if (message) {
         // 获取当前频道（从输入框的 dataset 读取）
-        const currentChannel = module?.getCurrentChatChannel?.() || 'global'
+        const currentChannel = chatInput.dataset.channel || 'global'
         multiplayer.sendChat(message, currentChannel)
 
         // 显示自己的消息
