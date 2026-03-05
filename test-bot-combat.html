@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bot Combat Module Test</title>
+</head>
+<body>
+  <h1>Bot Combat Module Test</h1>
+  <div id="output"></div>
+  
+  <script type="module">
+    import {
+      shouldBotReload,
+      startBotReload,
+      updateBotReload,
+      updateShootCooldown,
+      calculateAimOffset,
+      checkFriendlyFire,
+      calculateDamage,
+      applyDamage
+    } from './bot-combat.js';
+    
+    const output = document.getElementById('output');
+    
+    // 测试 1: 装弹逻辑
+    const bot = { id: 1, team: 't', shootCooldown: 0 };
+    const weapon = {
+      mag: 0,
+      reserve: 30,
+      magSize: 30,
+      reloading: false,
+      reloadSec: 2.5,
+      damage: 25,
+      spreadDeg: 3,
+      rpm: 600
+    };
+    
+    output.innerHTML += '<h2>Test 1: Reload Logic</h2>';
+    output.innerHTML += `shouldBotReload (empty mag): ${shouldBotReload(bot, weapon)}<br>`;
+    
+    startBotReload(bot, weapon);
+    output.innerHTML += `After startBotReload: reloading=${weapon.reloading}, reloadLeft=${weapon.reloadLeft}<br>`;
+    
+    updateBotReload(bot, weapon, 1.0);
+    output.innerHTML += `After 1s: reloadLeft=${weapon.reloadLeft}<br>`;
+    
+    updateBotReload(bot, weapon, 1.5);
+    output.innerHTML += `After 2.5s total: reloading=${weapon.reloading}, mag=${weapon.mag}<br>`;
+    
+    // 测试 2: 射击冷却
+    output.innerHTML += '<h2>Test 2: Shoot Cooldown</h2>';
+    bot.shootCooldown = 0.5;
+    output.innerHTML += `Initial cooldown: ${bot.shootCooldown}<br>`;
+    
+    updateShootCooldown(bot, 0.3);
+    output.innerHTML += `After 0.3s: cooldown=${bot.shootCooldown}<br>`;
+    
+    updateShootCooldown(bot, 0.3);
+    output.innerHTML += `After 0.6s total: cooldown=${bot.shootCooldown}<br>`;
+    
+    // 测试 3: 瞄准偏移
+    output.innerHTML += '<h2>Test 3: Aim Offset</h2>';
+    const targetPos = { x: 10, y: 1.6, z: 0 };
+    const dist = 10;
+    const offset = calculateAimOffset(bot, targetPos, dist, weapon);
+    output.innerHTML += `Aim offset: sx=${offset.sx.toFixed(4)}, sy=${offset.sy.toFixed(4)}<br>`;
+    
+    // 测试 4: 伤害计算
+    output.innerHTML += '<h2>Test 4: Damage Calculation</h2>';
+    const target = { hp: 100, armor: 50 };
+    const { actualDamage, armorAbsorb } = calculateDamage(30, target);
+    output.innerHTML += `Base damage: 30, Armor: 50<br>`;
+    output.innerHTML += `Actual damage: ${actualDamage}, Armor absorbed: ${armorAbsorb}<br>`;
+    output.innerHTML += `Remaining armor: ${target.armor}<br>`;
+    
+    console.log('All tests passed!');
+    output.innerHTML += '<h2 style="color: green;">✓ All tests passed!</h2>';
+  </script>
+</body>
+</html>

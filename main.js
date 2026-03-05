@@ -3,6 +3,7 @@ import { EventManager } from './event-manager.js'
 
 // Weapon animation import
 import { calculateWeaponKick, calculateWeaponSway, calculateWeaponBob, calculateMuzzleFlashColor } from './weapon-anim.js'
+import { updateWeapon as updateWeaponLogic } from './weapon-logic.js'
 
 // Multiplayer imports
 import MultiplayerClient, { TEAM_COLORS as TEAM_VISUALS, normalizeTeam } from './multiplayer.js'
@@ -43,6 +44,33 @@ import {
   getBestTarget,
   calculateYawToTarget 
 } from './bot-targeting.js'
+
+// Bot movement import
+import { 
+  findPath as findPathModule, 
+  moveAndCollide as moveAndCollideModule, 
+  updateBotMovement,
+  getRandomPatrolPoint as getRandomPatrolPointModule,
+  worldToGrid as worldToGridModule,
+  gridToWorld as gridToWorldModule,
+  isWalkable as isWalkableModule,
+  playerAabb
+} from './bot-movement.js'
+
+// Bot combat import
+import {
+  shouldBotReload,
+  startBotReload,
+  updateBotReload,
+  updateShootCooldown,
+  calculateAimOffset,
+  checkFriendlyFire,
+  calculateDamage,
+  applyDamage,
+  performBotShot,
+  checkBotReactionTime,
+  decideBotState
+} from './bot-combat.js'
 
 // 全局错误处理器 - 捕获未处理的Exception和Promise rejection
 window.addEventListener('error', (event) => {
@@ -471,18 +499,7 @@ function buildPlayerHitboxes(basePos, yaw = 0) {
 }
 
 // aabbIntersects 已移至 physics.js 模块
-
-function aabbIntersectsEps(a, b, eps) {
-  return (
-    a.min.x < b.max.x - eps &&
-    a.max.x > b.min.x + eps &&
-    a.min.y < b.max.y - eps &&
-    a.max.y > b.min.y + eps &&
-    a.min.z < b.max.z - eps &&
-    a.max.z > b.min.z + eps
-  );
-}
-
+// aabbIntersectsEps 已移至 bot-movement.js 模块
 // rayAabb 已移至 physics.js 模块
 
 function rayObbLocal(ro, rd, center, right, up, forward, half) {
@@ -841,6 +858,27 @@ function makeBot(id, pos) {
 }
 
 const DEFAULT_SPEED = 6.0;
+
+// ==================== 游戏状态辅助函数 ====================
+
+/**
+ * 获取玩家眼睛位置（相机位置）
+ * @param {Object} game - 游戏状态对象
+ * @returns {Object} v3 向量 - 眼睛位置
+ */
+function getPlayerEyePosition(game) {
+  return v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+}
+
+/**
+ * 将 bot 位置限制在地图边界内
+ * @param {Object} bot - bot 对象
+ * @param {Object} game - 游戏状态对象
+ */
+function clampBotPosition(bot, game) {
+  bot.pos.x = clamp(bot.pos.x, -game.mapBounds + 0.3, game.mapBounds - 0.3);
+  bot.pos.z = clamp(bot.pos.z, -game.mapBounds + 0.3, game.mapBounds - 0.3);
+}
 
 // ==================== 投掷物系统 ====================
 
@@ -1397,7 +1435,7 @@ class GrenadeManager {
 
   worldToScreen(worldPos, game) {
     try {
-      const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+      const camPos = getPlayerEyePosition(game);
       const fwd = forwardFromYawPitch(game.yaw, game.pitch);
       const camTarget = v3add(camPos, fwd);
 
@@ -3288,7 +3326,7 @@ function deployGrenade(type) {
   }
 
   // 计算投掷方向
-  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+  const camPos = getPlayerEyePosition(game);
   const throwDir = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
 
   // 投掷
@@ -5130,390 +5168,44 @@ function tryReload() {
   setStatus('Reloading...', false);
 }
 
-function playerAabb(pos) {
-  const half = v3(0.3, 0.9, 0.3);
-  const center = v3(pos.x, pos.y + half.y, pos.z);
-  return aabbFromCenter(center, half);
-}
+// playerAabb 已移至 bot-movement.js 模块
+// moveAndCollide 已移至 bot-movement.js 模块
 
-function moveAndCollide(pos, delta, colliders) {
-  let p = { x: pos.x, y: pos.y, z: pos.z };
-  let onGround = false;
-
-  const eps = 1e-4;
-
-  if (delta.x !== 0) {
-    p.x += delta.x;
-    let a = playerAabb(p);
-    for (const c of colliders) {
-      if (!aabbIntersectsEps(a, c, eps)) continue;
-      if (delta.x > 0) p.x = Math.min(p.x, c.min.x - 0.3);
-      else p.x = Math.max(p.x, c.max.x + 0.3);
-      a = playerAabb(p);
-    }
-  }
-
-  if (delta.z !== 0) {
-    p.z += delta.z;
-    let a = playerAabb(p);
-    for (const c of colliders) {
-      if (!aabbIntersectsEps(a, c, eps)) continue;
-      if (delta.z > 0) p.z = Math.min(p.z, c.min.z - 0.3);
-      else p.z = Math.max(p.z, c.max.z + 0.3);
-      a = playerAabb(p);
-    }
-  }
-
-  if (delta.y !== 0) {
-    p.y += delta.y;
-    let a = playerAabb(p);
-    for (const c of colliders) {
-      if (!aabbIntersectsEps(a, c, eps)) continue;
-      if (delta.y > 0) p.y = Math.min(p.y, c.min.y - 1.8);
-      else {
-        p.y = Math.max(p.y, c.max.y);
-        onGround = true;
-      }
-      a = playerAabb(p);
-    }
-  }
-
-  return { pos: p, onGround };
-}
-
-function rayBlockedBySmoke(ro, rd, maxDist) {
-  for (const s of game.smoke.active) {
-    const t = rayAabb(ro, rd, s.aabb);
-    if (t !== null && t > 0 && t < maxDist) return true;
-  }
-  return false;
-}
-
-function updateWeapon(dt) {
-  if (!game.playerAlive) return;
-  if (isRoundFrozen()) return;
-
-  const w = game.getWeapon();
-  if (!w) return;
-  if (w.cooldown > 0) w.cooldown = Math.max(0, w.cooldown - dt);
-  if (w.kick > 0) w.kick = Math.max(0, w.kick - dt * 4.5);
-  if (w.shot > 0) w.shot = Math.max(0, w.shot - dt * 14);
-  if (w.flash > 0) w.flash = Math.max(0, w.flash - dt * 18);
-
-  if (w.reloading) {
-    w.reloadLeft -= dt;
-    if (w.reloadLeft <= 0) {
-      const needed = w.def.magSize - w.mag;
-      const take = Math.min(needed, w.reserve);
-      w.mag += take;
-      w.reserve -= take;
-      w.reloading = false;
-      setStatus('Reloaded', false);
-    }
-    return;
-  }
-
-  if (w.def.kind === 4) {
-    if (!game.firePressed) return;
-    if (w.cooldown > 0) return;
-
-    game.firePressed = false;
-    w.cooldown = 0.5;
-
-    const roKnife = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
-    const rdKnife = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
-    const maxKnifeDist = 2.0;
-    let nearestBlock = maxKnifeDist;
-    for (const c of game.colliders) {
-      const t = rayAabb(roKnife, rdKnife, c);
-      if (t !== null && t > 0 && t < nearestBlock) nearestBlock = t;
-    }
-
-    let knifeTarget = null;
-    let knifeBestT = Math.min(maxKnifeDist, nearestBlock);
-    for (const bot of game.bots) {
-      if (!bot.alive) continue;
-      if (bot.team === game.team) continue;
-      const center = v3(bot.pos.x, bot.pos.y + bot.half.y, bot.pos.z);
-      const aabb = aabbFromCenter(center, bot.half);
-      const t = rayAabb(roKnife, rdKnife, aabb);
-      if (t === null || t <= 0 || t > knifeBestT) continue;
-      knifeBestT = t;
-      knifeTarget = bot;
-    }
-
-    if (!knifeTarget) {
-      setStatus('Miss', false);
-      return;
-    }
-
-    knifeTarget.hp -= 50;
-    audio.hit();
-    recordFireTime();
-    game.lastStatusAt = nowMs();
-    game.hitmarker.t = 0.12;
-    game.hitmarker.head = false;
-    if (knifeTarget.hp <= 0) {
-      knifeTarget.alive = false;
-      game.aliveBotsCacheDirty = true;
-      knifeTarget.respawnAt = nowMs() + 2500;
-      setStatus('Bot down', false);
-      game.stats.kills += 1;
-      addMoney(game.econ.rewardKill);
-    } else {
-      setStatus('Hit: -50', false);
-    }
-    return;
-  }
-
-  const fireHeld = game.mouseDown && game.pointerLocked;
-  const wantsFire = game.fireModeAuto ? fireHeld || game.firePressed : game.firePressed;
-  if (!wantsFire) return;
-  if (w.cooldown > 0) return;
-  if (w.mag <= 0) {
-    setStatus('Empty! Press R', true);
-    w.cooldown = 0.15;
-    game.firePressed = false;
-    return;
-  }
-
-  w.mag -= 1;
-  audio.shot(w.def.kind);
-  w.cooldown = 60 / w.def.rpm;
-  game.firePressed = false;
-  w.shot = Math.min(1, w.shot + 0.95);
-  w.flash = 1;
-
-  const recoilBase = w.def.recoil * (0.6 + Math.random() * 0.5);
-  const recoil = recoilBase;
-  game.pitch += recoil * 0.012;
-  game.yaw += (Math.random() - 0.5) * recoil * 0.007;
-  w.kick = Math.min(1, w.kick + 0.35);
-
-  // 使用新的散布系统
-  const spreadDeg = game.calculateSpread();
-  const spread = (spreadDeg * Math.PI) / 180;
-  const sx = (Math.random() - 0.5) * spread;
-  const sy = (Math.random() - 0.5) * spread;
-  const fwdCam = v3norm(forwardFromYawPitch(game.yaw, game.pitch));
-  const upCam = v3(0, 1, 0);
-  const rightCam = v3norm(v3cross(upCam, fwdCam));
-  const camUp = v3norm(v3cross(fwdCam, rightCam));
-  const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
-
-  const wpn = game.getWeapon();
-  const kick = wpn.kick;
-  const speed = Math.hypot(game.vel.x, game.vel.z);
-
-  const crouchAcc = lerp(1, 0.22, game.crouchT);
-  const moveAcc = 1 + clamp01(speed / 6) * 3.6;
-  const airAcc = game.onGround ? 1 : 2.2;
-  const landAcc = 1 + game.landKick * 1.8;
-  const spreadAcc = crouchAcc * moveAcc;
-  const weaponAcc = clamp((120 - w.def.accuracy) / 100, 0.24, 1.2);
-  const finalAcc = spreadAcc * airAcc * landAcc * weaponAcc;
-  const aimDirAcc = v3norm(forwardFromYawPitch(game.yaw + sx * finalAcc, game.pitch + sy * finalAcc));
-  const bobT = nowMs() * 0.001;
-  const bobA = 0.02 * clamp01(speed / 6);
-  const bobY = Math.sin(bobT * 9.5) * bobA;
-  const bobX = Math.cos(bobT * 9.5) * bobA;
-  const swayPosX = clamp(game.mouseDX * 0.0005, -0.03, 0.03);
-  const swayPosY = clamp(game.mouseDY * 0.0005, -0.03, 0.03);
-
-  const muzzle = v3add(
-    camPos,
-    v3add(
-      v3add(v3scale(rightCam, 0.55 + bobX + swayPosX), v3scale(camUp, -0.45 + bobY + kick * 0.03 + swayPosY)),
-      v3scale(fwdCam, 0.95)
-    )
-  );
-
-  const roAim = camPos;
-  const rdAim = aimDirAcc;
-  const roTrace = muzzle;
-  const rdTrace = aimDirAcc;
-
-  let bestT = Infinity;
-  let bestTarget = null;
-  let bestZone = '';
-  let bestMult = 1;
-
-  for (const c of game.colliders) {
-    const t = rayAabb(roAim, rdAim, c);
-    if (t === null) continue;
-    if (t > 0 && t < bestT) bestT = t;
-  }
-
-  if (rayBlockedBySmoke(roAim, rdAim, bestT)) {
-    bestT = Math.min(bestT, 12);
-    bestTarget = null;
-  }
-
-  // AABB 四叉树宽相 + OBB 部位窄相
-  collisionPerf.rayCasts++;
-  const maxTargetDist = Math.min(90, Number.isFinite(bestT) ? bestT : 90);
-  const queryAabb = raySweepAabb2(roAim, rdAim, maxTargetDist, 1.4);
-  const targetTree = game.collisionQuadtree;
-  targetTree.clear();
-
-  for (let i = 0; i < game.bots.length; i++) {
-    const bot = game.bots[i];
-    if (!bot || !bot.alive) continue;
-    if (bot.team === game.team) continue;
-
-    const basePos = v3(bot.pos.x, bot.pos.y, bot.pos.z);
-    const entry = {
-      id: `bot:${i}`,
-      type: 'bot',
-      bot,
-      basePos,
-      position: basePos,
-      yaw: safeNumber(bot.yaw, 0),
-    };
-    const broadAabb2 = aabb3To2(playerBroadPhaseAabb(basePos));
-    targetTree.insert(entry, broadAabb2);
-  }
-
-  if (game.mode === 'online') {
-    for (const [playerId, playerData] of otherPlayers) {
-      if (!playerData || playerData.deathHidden) continue;
-      const hp = readSyncedHp(playerData, 100);
-      if (playerData.alive === false || hp <= 0) continue;
-      if (playerData.team === game.team) continue;
-      if (!playerData.position) continue;
-
-      const pos = playerData.position;
-      const basePos = v3(pos.x, pos.y, pos.z);
-      const entry = {
-        id: `player:${playerId}`,
-        type: 'player',
-        playerId,
-        playerData,
-        basePos,
-        position: pos,
-        yaw: safeNumber(playerData.yaw, 0),
-      };
-      const broadAabb2 = aabb3To2(playerBroadPhaseAabb(basePos));
-      targetTree.insert(entry, broadAabb2);
-    }
-  }
-
-  const broadCandidates = targetTree.query(queryAabb);
-  collisionPerf.broadPhaseCandidates += broadCandidates.length;
-
-  for (const candidate of broadCandidates) {
-    const distToTarget = v3len(v3sub(roAim, candidate.basePos));
-    if (distToTarget > 95) {
-      collisionPerf.earlyExits++;
-      continue;
-    }
-
-    const hitboxes = buildPlayerHitboxes(candidate.basePos, candidate.yaw);
-    for (const hb of hitboxes) {
-      collisionPerf.narrowPhaseTests++;
-      const t = rayObbLocal(roAim, rdAim, hb.c, hb.r, hb.u, hb.f, hb.h);
-      if (t === null || t <= 0 || t >= bestT) continue;
-
-      bestT = t;
-      bestTarget = candidate;
-      bestZone = hb.zone;
-      bestMult = hb.mult;
-
-      // 命中头部后跳过该目标剩余 hitbox。
-      if (hb.zone === 'head') {
-        collisionPerf.earlyExits++;
-        break;
-      }
-    }
-  }
-
-  if (bestTarget) {
-    // 距离衰减伤害计算
-    const targetPos = bestTarget.position || bestTarget.basePos || bestTarget.pos;
-    const distance = targetPos ? v3len(v3sub(roAim, targetPos)) : 0;
-    const maxRange = 80; // 最大有效射程
-    const falloffStart = 20; // 开始衰减的距离
-    const falloffMult = distance < falloffStart
-      ? 1.0
-      : distance > maxRange
-        ? 0.1
-        : 1.0 - ((distance - falloffStart) / (maxRange - falloffStart)) * 0.9;
-
-    const dmg = Math.floor(w.def.damage * bestMult * falloffMult);
-
-    const isHeadshot = bestZone === 'head';
-    const zoneFx = getHitZoneFeedback(bestZone);
-
-    // 多人模式：发送伤害事件到服务器
-    if (bestTarget.type === 'player') {
-      const weaponType = w && w.def ? w.def.id : 'unknown';
-      // 标准化伤害区域命名
-      const normalizedZone = bestZone === 'torso' ? 'body' : bestZone;
-      multiplayer.sendHit(bestTarget.playerId, dmg, weaponType, {
-        hitZone: normalizedZone || 'body',
-        headshot: isHeadshot
-      });
-      audio.hit();
-      recordFireTime();
-      game.lastStatusAt = nowMs();
-      game.hitmarker.t = 0.12;
-      game.hitmarker.head = isHeadshot;
-      spawnDamageNumberForPlayer(bestTarget.playerId, dmg, { crit: isHeadshot, color: zoneFx.color });
-      const targetName = (bestTarget.playerData && bestTarget.playerData.name) || 'Player';
-      setStatus(`Hit ${targetName} [${zoneFx.label}]: -${dmg}`, false);
-    } else {
-      // AI 模式：本地处理bot伤害
-      const bot = bestTarget.bot;
-      if (!bot) {
-        setStatus('Miss', false);
-      } else {
-        bot.hp -= dmg;
-        audio.hit();
-        recordFireTime();
-        game.lastStatusAt = nowMs();
-        game.hitmarker.t = 0.12;
-        game.hitmarker.head = isHeadshot;
-        spawnDamageNumber(v3(bot.pos.x, bot.pos.y, bot.pos.z), dmg, { crit: isHeadshot, color: zoneFx.color });
-        if (bot.hp <= 0) {
-          bot.alive = false;
-          game.aliveBotsCacheDirty = true;
-          bot.respawnAt = nowMs() + 2500;
-          setStatus('Bot down', false);
-          game.stats.kills += 1;
-          if (bot.team !== game.team) addMoney(game.econ.rewardKill);
-        } else {
-          setStatus(`Hit [${zoneFx.label}]: -${dmg}`, false);
-        }
-      }
-    }
-  } else {
-    setStatus('Miss', false);
-  }
-
-  const endAim = bestT < Infinity ? v3add(roAim, v3scale(rdAim, Math.min(bestT, 80))) : v3add(roAim, v3scale(rdAim, 80));
-  const endTrace = endAim;
-  const tracer = obtainTracer();
-  tracer.a = roTrace;
-  tracer.b = endTrace;
-  tracer.travel = 0;
-  tracer.speed = 110;
-  tracer.life = 0.32;
-  tracer.hue = 0.55;
-  game.tracers.push(tracer);
-
-  const shellPos = v3add(
-    camPos,
-    v3add(v3scale(rightCam, 0.42), v3add(v3scale(camUp, -0.22), v3scale(fwdCam, 0.62)))
-  );
-  const rv = 2.4 + Math.random() * 1.2;
-  const uv = 1.6 + Math.random() * 1.0;
-  const fv = 0.8 + Math.random() * 0.7;
-  const shellVel = v3add(v3scale(rightCam, rv), v3add(v3scale(camUp, uv), v3scale(fwdCam, fv)));
-  const shell = obtainShell();
-  shell.pos = shellPos;
-  shell.vel = shellVel;
-  shell.life = 1.6;
-  game.shells.push(shell);
+const weaponLogicDeps = {
+  isRoundFrozen,
+  setStatus,
+  audio,
+  recordFireTime,
+  nowMs,
+  addMoney,
+  forwardFromYawPitch,
+  rayAabb,
+  aabbFromCenter,
+  collisionPerf,
+  raySweepAabb2,
+  aabb3To2,
+  playerBroadPhaseAabb,
+  safeNumber,
+  otherPlayers,
+  readSyncedHp,
+  buildPlayerHitboxes,
+  rayObbLocal,
+  getHitZoneFeedback,
+  multiplayer,
+  spawnDamageNumber,
+  spawnDamageNumberForPlayer,
+  obtainTracer,
+  obtainShell,
+  v3,
+  v3add,
+  v3sub,
+  v3scale,
+  v3cross,
+  v3len,
+  v3norm,
+  clamp01,
+  clamp,
+  lerp
 }
 
 function updateShells(dt) {
@@ -5768,7 +5460,7 @@ function updatePlayer(dt) {
   game.vel.y = Math.max(game.vel.y, -30);
 
   const delta = v3scale(game.vel, dt);
-  const moved = moveAndCollide(game.pos, delta, game.colliders);
+  const moved = moveAndCollideModule(game.pos, delta, game.colliders);
   game.pos = moved.pos;
   if (moved.onGround) {
     if (!game.onGround && game.vel.y < -4) {
@@ -5847,172 +5539,43 @@ function buildNavGrid() {
   }
 }
 
+// ==================== 导航辅助函数包装器（调用 bot-movement.js 模块）====================
+
 /**
- * 世界坐标转网格坐标
+ * 世界坐标转网格坐标（包装器）
  */
 function worldToGrid(x, z) {
-  const gx = Math.floor((x - NAV_GRID_ORIGIN) / (game.mapBounds * 2 / NAV_GRID_SIZE));
-  const gz = Math.floor((z - NAV_GRID_ORIGIN) / (game.mapBounds * 2 / NAV_GRID_SIZE));
-  return { x: clamp(gx, 0, NAV_GRID_SIZE - 1), z: clamp(gz, 0, NAV_GRID_SIZE - 1) };
+  return worldToGridModule(x, z, game.mapBounds);
 }
 
 /**
- * 网格坐标转世界坐标
+ * 网格坐标转世界坐标（包装器）
  */
 function gridToWorld(gx, gz) {
-  const x = NAV_GRID_ORIGIN + (gx + 0.5) * (game.mapBounds * 2 / NAV_GRID_SIZE);
-  const z = NAV_GRID_ORIGIN + (gz + 0.5) * (game.mapBounds * 2 / NAV_GRID_SIZE);
-  return v3(x, 0, z);
+  return gridToWorldModule(gx, gz, game.mapBounds);
 }
 
 /**
- * 检查网格点是否可通行
+ * 检查网格点是否可通行（包装器）
  */
 function isWalkable(gx, gz) {
-  if (gx < 0 || gx >= NAV_GRID_SIZE || gz < 0 || gz >= NAV_GRID_SIZE) return false;
-  return game.grid[gx][gz] === 0;
+  return isWalkableModule(gx, gz, game.grid);
 }
 
-/**
- * A* 启发式函数（曼哈顿距离）
- */
-function heuristic(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
-}
+// heuristic, getNeighbors 已移至 bot-movement.js 模块（内部使用）
 
 /**
- * 获取节点的邻居（4方向）
- */
-function getNeighbors(node) {
-  const neighbors = [];
-  const directions = [
-    { x: 1, z: 0 },
-    { x: -1, z: 0 },
-    { x: 0, z: 1 },
-    { x: 0, z: -1 },
-  ];
-
-  for (const dir of directions) {
-    const neighbor = { x: node.x + dir.x, z: node.z + dir.z };
-    if (isWalkable(neighbor.x, neighbor.z)) {
-      neighbors.push(neighbor);
-    }
-  }
-
-  return neighbors;
-}
-
-/**
- * A* 寻路算法
- * @param {Object} start - 起点 {x, z} 世界坐标
- * @param {Object} end - 终点 {x, z} 世界坐标
- * @returns {Array} - 路径点数组，如果找不到路径则返回 null
+ * A* 寻路算法（包装器）
  */
 function findPath(start, end) {
-  const startGrid = worldToGrid(start.x, start.z);
-  const endGrid = worldToGrid(end.x, end.z);
-
-  // 如果终点不可达，尝试找最近的可通行点
-  if (!isWalkable(endGrid.x, endGrid.z)) {
-    let found = false;
-    for (let r = 1; r < 5 && !found; r++) {
-      for (let dx = -r; dx <= r && !found; dx++) {
-        for (let dz = -r; dz <= r && !found; dz++) {
-          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
-          if (isWalkable(endGrid.x + dx, endGrid.z + dz)) {
-            endGrid.x += dx;
-            endGrid.z += dz;
-            found = true;
-          }
-        }
-      }
-    }
-    if (!found) return null;
-  }
-
-  // A* 算法
-  const openSet = [startGrid];
-  const closedSet = new Set();
-  const cameFrom = new Map();
-
-  const gScore = new Map();
-  const fScore = new Map();
-
-  const key = (n) => `${n.x},${n.z}`;
-  gScore.set(key(startGrid), 0);
-  fScore.set(key(startGrid), heuristic(startGrid, endGrid));
-
-  let iterations = 0;
-  const maxIterations = 1000; // 防止无限循环
-
-  while (openSet.length > 0 && iterations < maxIterations) {
-    iterations++;
-
-    // 找到 fScore 最小的节点
-    let current = openSet[0];
-    let currentKey = key(current);
-    for (const node of openSet) {
-      const nodeKey = key(node);
-      if ((fScore.get(nodeKey) || Infinity) < (fScore.get(currentKey) || Infinity)) {
-        current = node;
-        currentKey = nodeKey;
-      }
-    }
-
-    // 到达终点
-    if (current.x === endGrid.x && current.z === endGrid.z) {
-      // 重建路径
-      const path = [];
-      let curr = current;
-      while (cameFrom.has(key(curr))) {
-        path.unshift(gridToWorld(curr.x, curr.z));
-        curr = cameFrom.get(key(curr));
-      }
-      return path.length > 0 ? path : [gridToWorld(endGrid.x, endGrid.z)];
-    }
-
-    // 移除当前节点
-    openSet.splice(openSet.indexOf(current), 1);
-    closedSet.add(currentKey);
-
-    // 检查邻居
-    for (const neighbor of getNeighbors(current)) {
-      const neighborKey = key(neighbor);
-      if (closedSet.has(neighborKey)) continue;
-
-      const tentativeGScore = (gScore.get(currentKey) || 0) + 1; // 每步代价为 1
-
-      if (!openSet.some((n) => n.x === neighbor.x && n.z === neighbor.z)) {
-        openSet.push(neighbor);
-      } else if (tentativeGScore >= (gScore.get(neighborKey) || Infinity)) {
-        continue;
-      }
-
-      cameFrom.set(neighborKey, current);
-      gScore.set(neighborKey, tentativeGScore);
-      fScore.set(neighborKey, tentativeGScore + heuristic(neighbor, endGrid));
-    }
-  }
-
-  // 找不到路径
-  return null;
+  return findPathModule(start, end, game.mapBounds, game.grid);
 }
 
 /**
- * 获取随机巡逻点
+ * 获取随机巡逻点（包装器）
  */
 function getRandomPatrolPoint() {
-  const attempts = 20;
-  for (let i = 0; i < attempts; i++) {
-    const x = (Math.random() - 0.5) * game.mapBounds * 1.6;
-    const z = (Math.random() - 0.5) * game.mapBounds * 1.6;
-    const grid = worldToGrid(x, z);
-    if (isWalkable(grid.x, grid.z)) {
-      return v3(x, 0, z);
-    }
-  }
-  // 默认返回地图中心
-  return v3(0, 0, 0);
+  return getRandomPatrolPointModule(game.mapBounds, game.grid);
 }
 
 // ==================== AI 更新 ====================
@@ -6074,7 +5637,7 @@ function updateBots(dt) {
 function updateBotsMainThread(dt) {
 
   const tNow = nowMs();
-  const playerEye = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+  const playerEye = getPlayerEyePosition(game);
   // Use cached alive bots list to avoid creating new array every frame
   if (game.aliveBotsCacheDirty) {
     game.aliveBotsCache = game.bots.filter((x) => x.alive);
@@ -6084,19 +5647,11 @@ function updateBotsMainThread(dt) {
   for (const b of game.bots) {
     if (!b.alive) continue;
 
-    if (b.shootCooldown > 0) b.shootCooldown = Math.max(0, b.shootCooldown - dt);
+    // 使用 bot-combat 模块更新射击冷却和装弹
+    updateShootCooldown(b, dt);
+    updateBotReload(b, b.weapon, dt);
 
     const bw = b.weapon;
-    if (bw.reloading) {
-      bw.reloadLeft -= dt;
-      if (bw.reloadLeft <= 0) {
-        const take = Math.min(bw.magSize - bw.mag, bw.reserve);
-        bw.mag += take;
-        bw.reserve -= take;
-        bw.reloading = false;
-      }
-    }
-
     const lookFrom = v3(b.pos.x, b.pos.y + 1.6, b.pos.z);
 
     // 使用 bot-targeting 模块进行目标选择
@@ -6122,23 +5677,9 @@ function updateBotsMainThread(dt) {
     // 检测目标可见性
     const occluded = !canSeeTarget(b, targetPos, dist, game.colliders);
 
-    const shouldChase = dist < 18 && !occluded;
-    b.state = shouldChase ? 'chase' : 'patrol';
-
-    // 反应时间逻辑：让 Bot 行为更像人类
+    const shouldChase = decideBotState(b, dist, occluded);
     const hasValidTarget = shouldChase && targetType !== 'site';
-    if (hasValidTarget && b.firstSawEnemyTime === null) {
-      // 首次发现敌人，记录时间戳
-      b.firstSawEnemyTime = tNow;
-    }
-    if (!hasValidTarget) {
-      // 目标丢失，重置反应时间状态
-      b.firstSawEnemyTime = null;
-    }
-    // 计算是否可以开火（带随机抖动 0.7~1.3 倍）
-    const reactionTime = b.reactionTime || 180;
-    const actualReactionTime = reactionTime * (0.7 + Math.random() * 0.6);
-    const canShoot = b.firstSawEnemyTime !== null && (tNow - b.firstSawEnemyTime) >= actualReactionTime;
+    const canShoot = checkBotReactionTime(b, hasValidTarget, tNow);
 
     let wish = v3(0, 0, 0);
     if (b.state === 'chase') {
@@ -6206,12 +5747,11 @@ function updateBotsMainThread(dt) {
     b.vel.y += -18.5 * dt;
     b.vel.y = Math.max(b.vel.y, -30);
 
-    const next = moveAndCollide(v3(b.pos.x, b.pos.y, b.pos.z), v3scale(b.vel, dt), game.colliders);
+    const next = moveAndCollideModule(v3(b.pos.x, b.pos.y, b.pos.z), v3scale(b.vel, dt), game.colliders);
     b.pos = next.pos;
     if (next.onGround && b.vel.y < 0) b.vel.y = 0;
 
-    b.pos.x = clamp(b.pos.x, -game.mapBounds + 0.3, game.mapBounds - 0.3);
-    b.pos.z = clamp(b.pos.z, -game.mapBounds + 0.3, game.mapBounds - 0.3);
+    clampBotPosition(b, game);
 
     const onSite = v3len(v3sub(v3(b.pos.x, 0, b.pos.z), v3(game.round.sitePos.x, 0, game.round.sitePos.z))) <= game.round.siteRadius;
     if (!game.round.bombPlanted && b.team === 't' && onSite) {
@@ -6221,106 +5761,48 @@ function updateBotsMainThread(dt) {
       game.round.ctDefusing = true;
     }
 
+    // 使用 bot-combat 模块处理战斗逻辑
     if (shouldChase && dist < 24 && !occluded && b.shootCooldown <= 0 && targetType !== 'site' && canShoot) {
-      if (!bw.reloading && bw.mag <= 0) {
-        bw.reloading = true;
-        bw.reloadTotal = bw.reloadSec;
-        bw.reloadLeft = bw.reloadSec;
+      // 检查是否需要装弹
+      if (shouldBotReload(b, bw)) {
+        startBotReload(b, bw);
       }
 
       if (!bw.reloading && bw.mag > 0) {
-        bw.mag -= 1;
-
-        const cooldown = 60 / bw.rpm;
-        b.shootCooldown = cooldown * (1.45 + Math.random() * 0.6);
-
-        const spread = (bw.spreadDeg * Math.PI) / 180;
-        const sx = (Math.random() - 0.5) * spread;
-        const sy = (Math.random() - 0.5) * spread;
-        const shotDir = v3norm(forwardFromYawPitch(b.yaw + sx, sy));
-
-        const muzzle = v3add(lookFrom, v3add(v3scale(v3norm(v3cross(v3(0, 1, 0), shotDir)), 0.18), v3scale(shotDir, 0.55)));
-        const end = v3add(muzzle, v3scale(shotDir, Math.min(dist + 4, 80)));
-
-        let blocked = false;
-        for (const ally of aliveBots) {
-          if (!ally.alive) continue;
-          if (ally.id === b.id) continue;
-          if (ally.team !== b.team) continue;
-          const center = v3(ally.pos.x, ally.pos.y + ally.half.y, ally.pos.z);
-          const aabb = aabbFromCenter(center, ally.half);
-          const tHit = rayAabb(muzzle, shotDir, aabb);
-          if (tHit !== null && tHit > 0 && tHit < dist) {
-            blocked = true;
-            break;
-          }
-        }
-
-        if (!blocked && game.playerAlive && game.team === b.team) {
-          const pAabb = playerAabb(game.pos);
-          const tHit = rayAabb(muzzle, shotDir, pAabb);
-          if (tHit !== null && tHit > 0 && tHit < dist) {
-            blocked = true;
-          }
-        }
-
-        if (blocked) {
-          b.shootCooldown = 0.18;
-          continue;
-        }
-
-        const botTracer = obtainTracer();
-        botTracer.a = muzzle;
-        botTracer.b = end;
-        botTracer.travel = 0;
-        botTracer.speed = 95;
-        botTracer.life = 0.32;
-        botTracer.hue = 0.02;
-        game.tracers.push(botTracer);
-
-        const hitChance = clamp01((26 - dist) / 26);
-        if (Math.random() < 0.02 + 0.11 * hitChance) {
-          if (targetType === 'player') {
-            if (game.team === b.team) {
-              b.shootCooldown = 0.18;
-              continue;
-            }
-            // 护甲减伤逻辑
-            const botDamage = bw.damage
-            let actualDamage = botDamage
-            const hasArmor = game.armor > 0
-            if (hasArmor && botDamage > 0) {
-              const armorAbsorb = Math.min(game.armor, botDamage * 0.3)
-              actualDamage = botDamage - armorAbsorb
-              game.armor = Math.max(0, game.armor - armorAbsorb * 0.5)
-            }
-
-            game.hp -= actualDamage;
-            if (game.hp <= 0) {
-              if (game.mode === 'online') {
-                handleLocalPlayerDeath('You died')
-              } else {
-                game.playerAlive = false;
-                game.hp = 0;
-                game.vel = v3(0, 0, 0);
-                setStatus('You died', true);
-                game.stats.deaths += 1;
-              }
-            } else {
-              setStatus('Hit by bot', true);
-            }
-          } else if (targetType === 'bot' && targetBot) {
-            if (targetBot.team === b.team) {
-              b.shootCooldown = 0.18;
-              continue;
-            }
-            targetBot.hp -= bw.damage;
-            if (targetBot.hp <= 0) {
-              targetBot.alive = false;
-              game.aliveBotsCacheDirty = true;
-              if (game.round.bombPlanted) {
-              }
-            }
+        const player = {
+          alive: game.playerAlive,
+          pos: game.pos,
+          team: game.team
+        };
+        const result = performBotShot(
+          b,
+          bw,
+          lookFrom,
+          dist,
+          targetType,
+          targetBot,
+          aliveBots,
+          player,
+          game,
+          playerAabb,
+          obtainTracer,
+          setStatus,
+          forwardFromYawPitch
+        );
+        
+        // 如果被阻挡（友军伤害或队友），继续下一个 Bot
+        if (result.blocked) continue;
+        
+        // 如果击中玩家且玩家死亡，处理死亡逻辑
+        if (result.killed && targetType === 'player') {
+          if (game.mode === 'online') {
+            handleLocalPlayerDeath('You died');
+          } else {
+            game.playerAlive = false;
+            game.hp = 0;
+            game.vel = v3(0, 0, 0);
+            setStatus('You died', true);
+            game.stats.deaths += 1;
           }
         }
       } else {
@@ -6603,7 +6085,7 @@ function drawWorld() {
     fwd = forwardFromYawPitch(spectatorCam.yaw, spectatorCam.pitch);
     camTarget = v3add(camPos, fwd);
   } else {
-    camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
+    camPos = getPlayerEyePosition(game);
     fwd = forwardFromYawPitch(game.yaw, game.pitch);
     camTarget = v3add(camPos, fwd);
   }
@@ -7166,7 +6648,7 @@ function renderOtherPlayersUI() {
 function worldToScreen(worldPos) {
   try {
     // 使用相机的视图和投影矩阵转换
-    const camPos = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z)
+    const camPos = getPlayerEyePosition(game)
     const fwd = forwardFromYawPitch(game.yaw, game.pitch)
     const camTarget = v3add(camPos, fwd)
 
@@ -7329,7 +6811,7 @@ function frame() {
 
   if (game.pointerLocked) {
     updatePlayer(dt);
-    updateWeapon(dt);
+    updateWeaponLogic(game, dt, weaponLogicDeps);
 
     // Send multiplayer movement only when in online mode
     if (game.mode === 'online') {
