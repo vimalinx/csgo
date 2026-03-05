@@ -5385,16 +5385,16 @@ function updatePlayer(dt) {
   const crouching = game.keys.has('ShiftLeft') || game.keys.has('ShiftRight');
   const sprint = game.keys.has('AltLeft') || game.keys.has('AltRight');
   const w = game.getWeapon();
-  const speed = w && w.def.speed ? w.def.speed : 6.0;
+  const weaponDef = w && w.def ? w.def : null;
+  const speed = weaponDef && weaponDef.speed ? weaponDef.speed : 6.0;
   const holdingThrowable =
-    !!w &&
-    !!w.def &&
-    (w.def.category === 'throwable' ||
-      w.def.category === 'grenade' ||
-      w.def.slot === 'grenade' ||
-      w.def.slot === 'utility' ||
-      w.def.id === 'flash' ||
-      w.def.id === 'smoke');
+    !!weaponDef &&
+    (weaponDef.category === 'throwable' ||
+      weaponDef.category === 'grenade' ||
+      weaponDef.slot === 'grenade' ||
+      weaponDef.slot === 'utility' ||
+      weaponDef.id === 'flash' ||
+      weaponDef.id === 'smoke');
   let baseSpeed = speed * (sprint ? 6.8 / 6.0 : 4.8 / 6.0);
   if (holdingThrowable) baseSpeed *= 0.9;
   
