@@ -451,16 +451,7 @@ function buildPlayerHitboxes(basePos, yaw = 0) {
   ];
 }
 
-function aabbIntersects(a, b) {
-  return (
-    a.min.x <= b.max.x &&
-    a.max.x >= b.min.x &&
-    a.min.y <= b.max.y &&
-    a.max.y >= b.min.y &&
-    a.min.z <= b.max.z &&
-    a.max.z >= b.min.z
-  );
-}
+// aabbIntersects 已移至 physics.js 模块
 
 function aabbIntersectsEps(a, b, eps) {
   return (
@@ -473,32 +464,7 @@ function aabbIntersectsEps(a, b, eps) {
   );
 }
 
-function rayAabb(ro, rd, box) {
-  const invX = 1 / (Math.abs(rd.x) < 1e-8 ? 1e-8 : rd.x);
-  const invY = 1 / (Math.abs(rd.y) < 1e-8 ? 1e-8 : rd.y);
-  const invZ = 1 / (Math.abs(rd.z) < 1e-8 ? 1e-8 : rd.z);
-
-  let tmin = (box.min.x - ro.x) * invX;
-  let tmax = (box.max.x - ro.x) * invX;
-  if (tmin > tmax) [tmin, tmax] = [tmax, tmin];
-
-  let tymin = (box.min.y - ro.y) * invY;
-  let tymax = (box.max.y - ro.y) * invY;
-  if (tymin > tymax) [tymin, tymax] = [tymax, tymin];
-  if (tmin > tymax || tymin > tmax) return null;
-  tmin = Math.max(tmin, tymin);
-  tmax = Math.min(tmax, tymax);
-
-  let tzmin = (box.min.z - ro.z) * invZ;
-  let tzmax = (box.max.z - ro.z) * invZ;
-  if (tzmin > tzmax) [tzmin, tzmax] = [tzmax, tzmin];
-  if (tmin > tzmax || tzmin > tmax) return null;
-  tmin = Math.max(tmin, tzmin);
-  tmax = Math.min(tmax, tzmax);
-
-  if (tmax < 0) return null;
-  return tmin >= 0 ? tmin : tmax;
-}
+// rayAabb 已移至 physics.js 模块
 
 function rayObbLocal(ro, rd, center, right, up, forward, half) {
   const d = v3sub(ro, center);
