@@ -6739,6 +6739,57 @@ function drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, sw
   drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
 }
 
+/**
+ * 计算武器后坐力偏移
+ * @param {Object} weapon - 武器对象
+ * @returns {number} 后坐力偏移值
+ */
+function calculateWeaponKick(weapon) {
+  return weapon.shot * 0.08; // 手枪 0.08，步枪 0.06
+}
+
+/**
+ * 计算武器摇摆向量
+ * @param {number} mouseDX - 鼠标X轴移动量
+ * @param {number} mouseDY - 鼠标Y轴移动量
+ * @param {Object} camRight - 摄像机右向量
+ * @param {Object} camUp - 摄像机上向量
+ * @param {Object} fwd - 前向向量
+ * @returns {Object} 摇摆向量 {swayRight, swayUp, swayFwd, swayPosX, swayPosY}
+ */
+function calculateWeaponSway(mouseDX, mouseDY, camRight, camUp, fwd) {
+  const swayX = clamp(mouseDX * 0.003, -0.06, 0.06);
+  const swayY = clamp(mouseDY * 0.003, -0.06, 0.06);
+  const swayPosX = clamp(mouseDX * 0.0005, -0.03, 0.03);
+  const swayPosY = clamp(mouseDY * 0.0005, -0.03, 0.03);
+  const swayRight = v3norm(v3add(camRight, v3scale(fwd, -swayX)));
+  const swayUp = v3norm(v3add(camUp, v3scale(fwd, swayY)));
+  const swayFwd = v3norm(fwd);
+  return { swayRight, swayUp, swayFwd, swayPosX, swayPosY };
+}
+
+/**
+ * 计算武器行走摆动
+ * @param {number} speed - 玩家移动速度
+ * @returns {Object} 摆动值 {bobX, bobY}
+ */
+function calculateWeaponBob(speed) {
+  const bobT = nowMs() * 0.001;
+  const bobA = 0.02 * clamp01(speed / 6);
+  const bobY = Math.sin(bobT * 9.5) * bobA;
+  const bobX = Math.cos(bobT * 9.5) * bobA;
+  return { bobX, bobY };
+}
+
+/**
+ * 计算枪口火光颜色
+ * @param {number} flash - 闪光强度 (0-1)
+ * @returns {Object} RGB颜色向量
+ */
+function calculateMuzzleFlashColor(flash) {
+  return v3(lerp(0.9, 1.0, flash), lerp(0.75, 0.95, flash), 0.2);
+}
+
 function drawWorld() {
   glsys.resize();
   const aspect = glsys.width / Math.max(1, glsys.height);
@@ -7001,19 +7052,16 @@ function drawWorld() {
   const camRight = v3norm(v3cross(worldUp, fwd));
   const camUp = v3norm(v3cross(fwd, camRight));
 
-  const swayX = clamp(game.mouseDX * 0.003, -0.06, 0.06);
-  const swayY = clamp(game.mouseDY * 0.003, -0.06, 0.06);
-  const swayPosX = clamp(game.mouseDX * 0.0005, -0.03, 0.03);
-  const swayPosY = clamp(game.mouseDY * 0.0005, -0.03, 0.03);
-  const swayRight = v3norm(v3add(camRight, v3scale(fwd, -swayX)));
-  const swayUp = v3norm(v3add(camUp, v3scale(fwd, swayY)));
-  const swayFwd = v3norm(fwd);
+  const { swayRight, swayUp, swayFwd, swayPosX, swayPosY } = calculateWeaponSway(
+    game.mouseDX,
+    game.mouseDY,
+    camRight,
+    camUp,
+    fwd
+  );
 
   const speed = Math.hypot(game.vel.x, game.vel.z);
-  const bobT = nowMs() * 0.001;
-  const bobA = 0.02 * clamp01(speed / 6);
-  const bobY = Math.sin(bobT * 9.5) * bobA;
-  const bobX = Math.cos(bobT * 9.5) * bobA;
+  const { bobX, bobY } = calculateWeaponBob(speed);
 
   const wmOrigin = v3add(
     camPos,
@@ -7075,7 +7123,7 @@ function drawWorld() {
     const metal = v3(0.22, 0.22, 0.24);
     const accent = v3(0.12, 0.23, 0.2);
 
-    const slide = w.shot * 0.08;
+    const slide = calculateWeaponKick(w);
 
     drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.0), v3(0.22, 0.12, 0.55), metal);
     drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.08, 0.12), v3(0.2, 0.08, 0.28), metal, -slide);
@@ -7084,7 +7132,7 @@ function drawWorld() {
     drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.46), v3(0.06, 0.06, 0.14), accent);
 
     if (w.flash > 0.001) {
-      const flash = v3(lerp(0.9, 1.0, w.flash), lerp(0.75, 0.95, w.flash), 0.2);
+      const flash = calculateMuzzleFlashColor(w.flash);
       drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.56), v3(0.09, 0.09, 0.12), flash);
     }
   } else {
@@ -7093,7 +7141,7 @@ function drawWorld() {
     const wood = v3(0.22, 0.16, 0.1);
     const accent = v3(0.12, 0.24, 0.22);
 
-    const bolt = w.shot * 0.06;
+    const bolt = calculateWeaponKick(w) * 0.75;
 
     drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, 0.0, 0.0), v3(0.22, 0.12, 0.95), metal);
     drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.1, 0.18), v3(0.16, 0.22, 0.24), dark);
@@ -7103,7 +7151,12 @@ function drawWorld() {
     drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, 0.02, 0.78), v3(0.06, 0.06, 0.12), accent, -bolt);
 
     if (w.flash > 0.001) {
-      const flash = v3(lerp(0.95, 1.0, w.flash), lerp(0.8, 0.98, w.flash), 0.25);
+      const baseFlash = calculateMuzzleFlashColor(w.flash);
+      const flash = v3(
+        lerp(baseFlash.x, 1.0, 0.5),
+        baseFlash.y + 0.05 - 0.02 * w.flash,
+        baseFlash.z + 0.05
+      );
       drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.01, 0.98), v3(0.12, 0.1, 0.16), flash);
     }
   }
