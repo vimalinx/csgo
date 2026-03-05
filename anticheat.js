@@ -20,6 +20,25 @@ const ANTI_CHEAT_CONFIG = {
     POSITION_TELEPORT_THRESHOLD: 500, // 瞬移检测阈值（units）
     AIMBOT_ANGLE_THRESHOLD: 0.1,      // 自瞄检测角度阈值（弧度）
     MAX_REACTION_TIME: 100,           // 最小反应时间（毫秒）
+    INSTANT_LOCK: {
+        enabled: true,
+        maxTimeWindow: 120,           // 判定瞬锁的最大时间窗口（毫秒）
+        minSnapAngle: Math.PI / 6,    // 最小视角突变角度（30度，弧度）
+        lockAngleThreshold: 0.03       // 锁定目标时的最大角误差（弧度）
+    },
+    HEADSHOT_RATIO: {
+        enabled: true,
+        ratioThreshold: 0.85,          // 异常爆头率阈值
+        minHits: 20,                   // 最小命中样本数
+        sampleSize: 60                 // 统计窗口大小（最近射击数）
+    },
+    WALL_BANG: {
+        enabled: true,
+        maxPenetrationCount: 2,        // 最大合理穿透次数
+        maxWallThickness: 48,          // 最大合理穿透厚度
+        suspiciousWindowSize: 30,      // 统计穿墙比例窗口
+        suspiciousRatioThreshold: 0.6  // 穿墙命中可疑比例阈值
+    },
     
     // 射击检测
     MAX_FIRE_RATE: {
@@ -33,7 +52,15 @@ const ANTI_CHEAT_CONFIG = {
     // 处罚设置
     WARNING_THRESHOLD: 3,    // 警告阈值
     KICK_THRESHOLD: 10,      // 踢出阈值
-    BAN_THRESHOLD: 20        // 封禁阈值
+    BAN_THRESHOLD: 20,       // 封禁阈值
+    
+    // 违规计数器时间衰减
+    VIOLATION_DECAY: {
+        enabled: true,
+        decayIntervalMs: 60000,    // 每60秒衰减一次
+        decayRate: 0.5,            // 每次衰减50%
+        minDecayAgeMs: 30000       // 违规记录至少存在30秒才开始衰减
+    }
 };
 
 const WEAPON_RECOIL_PATTERNS = {
@@ -414,6 +441,17 @@ class ShootValidator {
      */
     validateShot(playerId, shootData) {
         const issues = [];
+        const addIssue = (issue) => {
+            if (!issue) return;
+
+            const normalizedIssue = {
+                ...issue,
+                timestamp: issue.timestamp || shootData.timestamp || Date.now()
+            };
+
+            issues.push(normalizedIssue);
+            this.logSuspiciousActivity(playerId, normalizedIssue);
+        };
         
         // 初始化玩家射击记录
         if (!this.playerShots.has(playerId)) {
@@ -432,7 +470,7 @@ class ShootValidator {
             const fireRateIssue = this.checkFireRate(weapon, timeDiff);
             
             if (fireRateIssue) {
-                issues.push(fireRateIssue);
+                addIssue(fireRateIssue);
             }
         }
         
@@ -444,7 +482,7 @@ class ShootValidator {
             );
             
             if (!recoilResult.valid) {
-                issues.push({
+                addIssue({
                     type: recoilResult.reason,
                     weapon: shootData.weapon,
                     deviation: recoilResult.deviation,
@@ -453,7 +491,19 @@ class ShootValidator {
             }
         }
         
-        // 3. 检测自瞄（视角瞬间锁定）
+        // 3. 检测视角瞬间锁定
+        if (playerData.lastShot && targetPosition) {
+            const instantLockIssue = this.checkInstantLock(
+                playerData.lastShot,
+                shootData
+            );
+            
+            if (instantLockIssue) {
+                addIssue(instantLockIssue);
+            }
+        }
+        
+        // 4. 兼容旧版自瞄检测
         if (playerData.lastShot && targetPosition) {
             const aimbotIssue = this.checkAimbot(
                 playerData.lastShot,
@@ -461,11 +511,11 @@ class ShootValidator {
             );
             
             if (aimbotIssue) {
-                issues.push(aimbotIssue);
+                addIssue(aimbotIssue);
             }
         }
         
-        // 4. 检测异常反应时间
+        // 5. 检测异常反应时间
         if (targetPosition) {
             const reactionIssue = this.checkReactionTime(
                 playerId,
@@ -473,16 +523,31 @@ class ShootValidator {
             );
             
             if (reactionIssue) {
-                issues.push(reactionIssue);
+                addIssue(reactionIssue);
             }
         }
-        
-        // 记录射击
+
+        // 6. 检测可疑穿墙行为（透视辅助特征）
+        const wallBangIssue = this.checkWallBang({
+            ...shootData,
+            playerId
+        });
+        if (wallBangIssue) {
+            addIssue(wallBangIssue);
+        }
+
+        // 记录射击（后续检测会复用当前 shots）
         playerData.shots.push({
             ...shootData,
             issues: issues
         });
-        
+
+        // 7. 检测异常头部命中率（包含当前射击）
+        const headshotRatioIssue = this.checkHeadshotRatio(playerId);
+        if (headshotRatioIssue) {
+            addIssue(headshotRatioIssue);
+        }
+
         // 只保留最近200发子弹
         if (playerData.shots.length > 200) {
             playerData.shots.shift();
@@ -572,6 +637,197 @@ class ShootValidator {
         
         return null;
     }
+
+    /**
+     * 检测视角瞬间锁定（显性自瞄）
+     */
+    checkInstantLock(lastShot, currentShot) {
+        const config = {
+            ...ANTI_CHEAT_CONFIG.INSTANT_LOCK,
+            ...(this.config.INSTANT_LOCK || {})
+        };
+        if (config.enabled === false) return null;
+
+        if (!lastShot || !currentShot || !lastShot.viewAngles || !currentShot.viewAngles) {
+            return null;
+        }
+
+        const timeDiff = currentShot.timestamp - lastShot.timestamp;
+        if (!Number.isFinite(timeDiff) || timeDiff <= 0 || timeDiff > config.maxTimeWindow) {
+            return null;
+        }
+
+        const angleChange = this.calculateViewAngleChange(lastShot.viewAngles, currentShot.viewAngles);
+        if (!angleChange || angleChange.total < config.minSnapAngle) {
+            return null;
+        }
+
+        const currentAimError = this.calculateAimError(
+            currentShot.position,
+            currentShot.viewAngles,
+            currentShot.targetPosition
+        );
+        if (!Number.isFinite(currentAimError) || currentAimError > config.lockAngleThreshold) {
+            return null;
+        }
+
+        let previousAimError = null;
+        if (lastShot.position && lastShot.targetPosition) {
+            previousAimError = this.calculateAimError(
+                lastShot.position,
+                lastShot.viewAngles,
+                lastShot.targetPosition
+            );
+        }
+
+        const improvedRapidly = Number.isFinite(previousAimError)
+            ? (previousAimError - currentAimError) >= config.minSnapAngle * 0.5
+            : true;
+
+        if (!improvedRapidly) {
+            return null;
+        }
+
+        return {
+            type: 'INSTANT_LOCK_SUSPECTED',
+            timeDiff,
+            angleChange: {
+                yaw: angleChange.yaw,
+                pitch: angleChange.pitch,
+                total: angleChange.total
+            },
+            aimError: {
+                previous: Number.isFinite(previousAimError) ? previousAimError : null,
+                current: currentAimError
+            },
+            threshold: {
+                maxTimeWindow: config.maxTimeWindow,
+                minSnapAngle: config.minSnapAngle,
+                lockAngleThreshold: config.lockAngleThreshold
+            },
+            timestamp: currentShot.timestamp || Date.now()
+        };
+    }
+
+    /**
+     * 检测异常头部命中率
+     */
+    checkHeadshotRatio(playerId) {
+        const config = {
+            ...ANTI_CHEAT_CONFIG.HEADSHOT_RATIO,
+            ...(this.config.HEADSHOT_RATIO || {})
+        };
+        if (config.enabled === false) return null;
+
+        const playerData = this.playerShots.get(playerId);
+        if (!playerData || playerData.shots.length === 0) {
+            return null;
+        }
+
+        const sampleSize = Math.max(1, config.sampleSize || playerData.shots.length);
+        const sampleShots = playerData.shots.slice(-sampleSize);
+        const hitShots = sampleShots.filter((shot) => this.isHitShot(shot));
+
+        if (hitShots.length < (config.minHits || 1)) {
+            return null;
+        }
+
+        const headshotCount = hitShots.filter((shot) => this.isHeadshotShot(shot)).length;
+        const ratio = headshotCount / hitShots.length;
+
+        if (ratio >= config.ratioThreshold) {
+            return {
+                type: 'ABNORMAL_HEADSHOT_RATIO',
+                ratio,
+                threshold: config.ratioThreshold,
+                headshots: headshotCount,
+                hits: hitShots.length,
+                sampleSize: sampleShots.length,
+                timestamp: Date.now()
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * 检测透视辅助特征（异常穿墙命中）
+     */
+    checkWallBang(shootData) {
+        const config = {
+            ...ANTI_CHEAT_CONFIG.WALL_BANG,
+            ...(this.config.WALL_BANG || {})
+        };
+        if (config.enabled === false || !shootData) {
+            return null;
+        }
+
+        const playerId = shootData.playerId;
+        const penetrationCount = this.getNumericField(
+            shootData,
+            ['penetrationCount', 'wallPenetrationCount', 'penetrateCount'],
+            0
+        );
+        const wallThickness = this.getNumericField(
+            shootData,
+            ['wallThickness', 'penetrationDepth', 'obstacleThickness'],
+            0
+        );
+        const isWallBangFlag = this.isWallBangShot(shootData);
+        const noLineOfSight = (
+            shootData.hasLineOfSight === false ||
+            shootData.lineOfSight === false ||
+            shootData.visible === false
+        );
+
+        if (!isWallBangFlag) {
+            return null;
+        }
+
+        const severePenetration = penetrationCount > config.maxPenetrationCount;
+        const excessiveThickness = wallThickness > config.maxWallThickness;
+        const currentIsHit = this.isHitShot(shootData);
+        const currentIsWallBangHit = currentIsHit && isWallBangFlag;
+        let suspiciousRatio = 0;
+        let windowHits = 0;
+        let windowWallBangHits = 0;
+
+        if (playerId && this.playerShots.has(playerId)) {
+            const playerData = this.playerShots.get(playerId);
+            const windowSize = Math.max(1, config.suspiciousWindowSize || 30);
+            const recentShots = playerData.shots.slice(-windowSize);
+            const hitShots = recentShots.filter((shot) => this.isHitShot(shot));
+            const wallBangHits = hitShots.filter((shot) => this.isWallBangShot(shot));
+
+            windowHits = hitShots.length + (currentIsHit ? 1 : 0);
+            windowWallBangHits = wallBangHits.length + (currentIsWallBangHit ? 1 : 0);
+
+            if (windowHits > 0) {
+                suspiciousRatio = windowWallBangHits / windowHits;
+            }
+        }
+
+        const ratioThreshold = config.suspiciousRatioThreshold || 1;
+        const ratioSuspicious = windowHits >= 6 && suspiciousRatio >= ratioThreshold;
+
+        if (!noLineOfSight && !severePenetration && !excessiveThickness && !ratioSuspicious) {
+            return null;
+        }
+
+        return {
+            type: 'WALL_BANG_SUSPECTED',
+            penetrationCount,
+            wallThickness,
+            noLineOfSight,
+            severePenetration,
+            excessiveThickness,
+            wallBangRatio: suspiciousRatio,
+            ratioThreshold,
+            windowHits,
+            windowWallBangHits,
+            timestamp: shootData.timestamp || Date.now()
+        };
+    }
     
     /**
      * 检测异常反应时间
@@ -613,6 +869,181 @@ class ShootValidator {
         }
         
         return null;
+    }
+
+    /**
+     * 记录可疑行为日志
+     */
+    logSuspiciousActivity(playerId, issue) {
+        if (!issue) return;
+
+        const timestamp = issue.timestamp || Date.now();
+        const details = { ...issue };
+        delete details.type;
+        delete details.timestamp;
+
+        console.warn('[ANTI-CHEAT][SUSPICIOUS_BEHAVIOR]', {
+            playerId,
+            timestamp,
+            detectionType: issue.type || 'UNKNOWN',
+            details
+        });
+    }
+
+    /**
+     * 判断射击是否命中
+     */
+    isHitShot(shot) {
+        if (!shot) return false;
+
+        return (
+            shot.hit === true ||
+            shot.isHit === true ||
+            Boolean(shot.targetPosition) ||
+            Boolean(shot.targetId) ||
+            (typeof shot.damage === 'number' && shot.damage > 0)
+        );
+    }
+
+    /**
+     * 判断是否为头部命中
+     */
+    isHeadshotShot(shot) {
+        if (!shot) return false;
+
+        return (
+            shot.headshot === true ||
+            shot.isHeadshot === true ||
+            shot.hitZone === 'head'
+        );
+    }
+
+    /**
+     * 判断是否为穿墙射击
+     */
+    isWallBangShot(shot) {
+        if (!shot) return false;
+
+        return (
+            shot.isWallBang === true ||
+            shot.wallBang === true ||
+            shot.throughWall === true ||
+            this.getNumericField(shot, ['penetrationCount', 'wallPenetrationCount', 'penetrateCount'], 0) > 0
+        );
+    }
+
+    /**
+     * 获取对象中的数值字段
+     */
+    getNumericField(source, fieldNames, defaultValue = 0) {
+        for (const field of fieldNames) {
+            const value = source[field];
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return value;
+            }
+        }
+        return defaultValue;
+    }
+
+    /**
+     * 计算两个视角之间的角度变化（统一为弧度）
+     */
+    calculateViewAngleChange(fromAngles, toAngles) {
+        if (!fromAngles || !toAngles) return null;
+
+        const fromYaw = Number(fromAngles.yaw);
+        const fromPitch = Number(fromAngles.pitch);
+        const toYaw = Number(toAngles.yaw);
+        const toPitch = Number(toAngles.pitch);
+        if (
+            !Number.isFinite(fromYaw) ||
+            !Number.isFinite(fromPitch) ||
+            !Number.isFinite(toYaw) ||
+            !Number.isFinite(toPitch)
+        ) {
+            return null;
+        }
+
+        const isDegree = (
+            Math.abs(fromYaw) > Math.PI * 2 + 1 ||
+            Math.abs(toYaw) > Math.PI * 2 + 1 ||
+            Math.abs(fromPitch) > Math.PI * 2 + 1 ||
+            Math.abs(toPitch) > Math.PI * 2 + 1
+        );
+        const cycle = isDegree ? 360 : Math.PI * 2;
+        const convert = isDegree ? (Math.PI / 180) : 1;
+
+        const yawDiffRaw = Math.abs(toYaw - fromYaw) % cycle;
+        const pitchDiffRaw = Math.abs(toPitch - fromPitch) % cycle;
+        const yaw = Math.min(yawDiffRaw, cycle - yawDiffRaw) * convert;
+        const pitch = Math.min(pitchDiffRaw, cycle - pitchDiffRaw) * convert;
+        const total = Math.sqrt(yaw * yaw + pitch * pitch);
+
+        return { yaw, pitch, total };
+    }
+
+    /**
+     * 计算当前准星与目标方向的角误差（弧度）
+     */
+    calculateAimError(position, viewAngles, targetPosition) {
+        if (!position || !viewAngles || !targetPosition) {
+            return null;
+        }
+
+        const fromX = Number(position.x);
+        const fromY = Number(position.y);
+        const fromZ = Number(position.z);
+        const toX = Number(targetPosition.x);
+        const toY = Number(targetPosition.y);
+        const toZ = Number(targetPosition.z);
+        const yawValue = Number(viewAngles.yaw);
+        const pitchValue = Number(viewAngles.pitch);
+
+        if (
+            !Number.isFinite(fromX) || !Number.isFinite(fromY) || !Number.isFinite(fromZ) ||
+            !Number.isFinite(toX) || !Number.isFinite(toY) || !Number.isFinite(toZ) ||
+            !Number.isFinite(yawValue) || !Number.isFinite(pitchValue)
+        ) {
+            return null;
+        }
+
+        const isDegree = Math.abs(yawValue) > Math.PI * 2 + 1 || Math.abs(pitchValue) > Math.PI * 2 + 1;
+        const yaw = isDegree ? yawValue * (Math.PI / 180) : yawValue;
+        const pitch = isDegree ? pitchValue * (Math.PI / 180) : pitchValue;
+
+        const cosPitch = Math.cos(pitch);
+        const aimDir = {
+            x: Math.sin(yaw) * cosPitch,
+            y: Math.sin(pitch),
+            z: Math.cos(yaw) * cosPitch
+        };
+
+        const toTarget = {
+            x: toX - fromX,
+            y: toY - fromY,
+            z: toZ - fromZ
+        };
+        const distance = Math.sqrt(
+            toTarget.x * toTarget.x +
+            toTarget.y * toTarget.y +
+            toTarget.z * toTarget.z
+        );
+        if (distance <= 0) return null;
+
+        const normalizedTarget = {
+            x: toTarget.x / distance,
+            y: toTarget.y / distance,
+            z: toTarget.z / distance
+        };
+
+        const dot = (
+            aimDir.x * normalizedTarget.x +
+            aimDir.y * normalizedTarget.y +
+            aimDir.z * normalizedTarget.z
+        );
+        const clampedDot = Math.min(1, Math.max(-1, dot));
+
+        return Math.acos(clampedDot);
     }
     
     /**
@@ -666,12 +1097,71 @@ class AntiCheatSystem {
         this.shootValidator = new ShootValidator(options.shootConfig);
         
         this.playerWarnings = new Map();
+        this.playerViolationTimes = new Map(); // 记录每次违规的时间戳
         this.config = ANTI_CHEAT_CONFIG;
         
         // 事件回调
         this.onViolation = options.onViolation || null;
         this.onWarning = options.onWarning || null;
         this.onKick = options.onKick || null;
+        
+        // 启动违规计数器时间衰减
+        this.decayTimerId = null;
+        this.startDecayTimer();
+    }
+    
+    /**
+     * 启动违规计数器时间衰减定时器
+     */
+    startDecayTimer() {
+        const decayConfig = this.config.VIOLATION_DECAY;
+        if (!decayConfig || !decayConfig.enabled) return;
+        
+        if (this.decayTimerId) {
+            clearInterval(this.decayTimerId);
+        }
+        
+        this.decayTimerId = setInterval(() => {
+            this.applyDecay();
+        }, decayConfig.decayIntervalMs);
+    }
+    
+    /**
+     * 应用违规计数器时间衰减
+     */
+    applyDecay() {
+        const decayConfig = this.config.VIOLATION_DECAY;
+        if (!decayConfig || !decayConfig.enabled) return;
+        
+        const now = Date.now();
+        
+        for (const [playerId, warnings] of this.playerWarnings.entries()) {
+            const times = this.playerViolationTimes.get(playerId) || [];
+            
+            // 过滤出最近的违规时间
+            const recentTimes = times.filter(t => now - t < decayConfig.minDecayAgeMs);
+            
+            // 如果没有最近的违规，应用衰减
+            if (recentTimes.length === 0 && warnings.total > 0) {
+                const newTotal = Math.floor(warnings.total * decayConfig.decayRate);
+                
+                if (newTotal < warnings.total) {
+                    console.log(`[ANTI-CHEAT][DECAY] Player ${playerId}: ${warnings.total} -> ${newTotal}`);
+                    warnings.total = newTotal;
+                    
+                    // 同时衰减各类型的违规计数
+                    for (const type of Object.keys(warnings.byType)) {
+                        warnings.byType[type] = Math.floor(warnings.byType[type] * decayConfig.decayRate);
+                    }
+                }
+            }
+            
+            // 清理过期的违规时间记录（超过5分钟）
+            this.playerViolationTimes.set(
+                playerId,
+                times.filter(t => now - t < 300000)
+            );
+        }
     }
     
     /**
@@ -738,6 +1228,12 @@ class AntiCheatSystem {
             });
         }
         
+        // 记录违规时间
+        if (!this.playerViolationTimes.has(playerId)) {
+            this.playerViolationTimes.set(playerId, []);
+        }
+        this.playerViolationTimes.get(playerId).push(Date.now());
+        
         const warnings = this.playerWarnings.get(playerId);
         warnings.total++;
         warnings.byType[type] = (warnings.byType[type] || 0) + 1;
@@ -784,6 +1280,7 @@ class AntiCheatSystem {
         this.positionValidator.resetPlayer(playerId);
         this.shootValidator.resetPlayer(playerId);
         this.playerWarnings.delete(playerId);
+        this.playerViolationTimes.delete(playerId);
     }
     
     /**
@@ -791,6 +1288,18 @@ class AntiCheatSystem {
      */
     setMapBounds(bounds) {
         this.positionValidator.setMapBounds(bounds);
+    }
+    
+    /**
+     * 销毁反作弊系统，清理资源
+     */
+    destroy() {
+        if (this.decayTimerId) {
+            clearInterval(this.decayTimerId);
+            this.decayTimerId = null;
+        }
+        this.playerWarnings.clear();
+        this.playerViolationTimes.clear();
     }
 }
 
