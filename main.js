@@ -35,7 +35,16 @@ import {
 // Render utils import
 import { drawHumanoid, drawWeaponPart, drawWeaponPartFwd } from './render-utils.js'
 
-// 全局错误处理器 - 捕获未处理的异常和Promise rejection
+// Bot targeting import
+import { 
+  selectTarget, 
+  evaluateTargetPriority, 
+  canSeeTarget, 
+  getBestTarget,
+  calculateYawToTarget 
+} from './bot-targeting.js'
+
+// 全局错误处理器 - 捕获未处理的Exception和Promise rejection
 window.addEventListener('error', (event) => {
   console.error('全局错误:', event.error)
   // 防止错误导致游戏崩溃
@@ -6090,83 +6099,28 @@ function updateBotsMainThread(dt) {
 
     const lookFrom = v3(b.pos.x, b.pos.y + 1.6, b.pos.z);
 
-    let bestEnemy = null;
-    let bestEnemyDist = Infinity;
-    for (const other of aliveBots) {
-      if (other.id === b.id) continue;
-      if (other.team === b.team) continue;
-      const oEye = v3(other.pos.x, other.pos.y + 1.6, other.pos.z);
-      const d = v3sub(oEye, lookFrom);
-      const L = v3len(d);
-      if (L < bestEnemyDist) {
-        bestEnemyDist = L;
-        bestEnemy = other;
-      }
-    }
-
-    let targetType = 'none';
-    let targetBot = null;
-    let targetPos = null;
-    let dist = Infinity;
-
-    if (bestEnemy) {
-      targetType = 'bot';
-      targetBot = bestEnemy;
-      targetPos = v3(bestEnemy.pos.x, bestEnemy.pos.y + 1.6, bestEnemy.pos.z);
-      dist = bestEnemyDist;
-    }
-
-    if (game.playerAlive && game.team !== b.team) {
-      const dPlayer = v3len(v3sub(playerEye, lookFrom));
-      if (dPlayer < dist) {
-        targetType = 'player';
-        targetBot = null;
-        targetPos = playerEye;
-        dist = dPlayer;
-      }
-    }
-
-    if (!game.round.bombPlanted && b.team === 't') {
-      const pick = getSiteByKey(b.objectiveSite) || getSiteByKey(game.round.activeSite) || getSiteByKey('A');
-      if (pick && !game.round.activeSite) game.round.activeSite = pick.key;
-      if (pick) b.objectiveSite = pick.key;
-      if (pick) setRoundSite(pick);
-      const site = pick ? pick.pos : game.round.sitePos;
-      const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
-      if (dSite < dist) {
-        targetType = 'site';
-        targetBot = null;
-        targetPos = v3(site.x, lookFrom.y, site.z);
-        dist = dSite;
-      }
-    }
-
-    if (game.round.bombPlanted && b.team === 'ct') {
-      const defSite = getSiteByKey(game.round.plantSite) || getSiteByKey(game.round.activeSite) || getSiteByKey('A');
-      if (defSite) setRoundSite(defSite);
-      const site = defSite ? defSite.pos : game.round.sitePos;
-      const dSite = v3len(v3sub(v3(site.x, lookFrom.y, site.z), lookFrom));
-      if (dSite < dist) {
-        targetType = 'site';
-        targetBot = null;
-        targetPos = v3(site.x, lookFrom.y, site.z);
-        dist = dSite;
-      }
-    }
+    // 使用 bot-targeting 模块进行目标选择
+    const playerInfo = {
+      alive: game.playerAlive,
+      eye: playerEye
+    };
+    
+    const gameState = {
+      team: game.team,
+      getSiteByKey: getSiteByKey,
+      setRoundSite: setRoundSite
+    };
+    
+    const targetResult = selectTarget(b, aliveBots, playerInfo, game.round, gameState);
+    const { targetType, targetBot, targetPos, dist } = targetResult;
 
     if (!targetPos) continue;
 
-    const toTarget = v3sub(targetPos, lookFrom);
-    const dir = dist > 1e-5 ? v3scale(toTarget, 1 / dist) : v3(0, 0, 1);
-    b.yaw = Math.atan2(dir.x, dir.z);
-    let occluded = false;
-    for (const c of game.colliders) {
-      const t = rayAabb(lookFrom, dir, c);
-      if (t !== null && t > 0 && t < dist) {
-        occluded = true;
-        break;
-      }
-    }
+    // 计算 Bot 朝向
+    b.yaw = calculateYawToTarget(b, targetPos, dist);
+    
+    // 检测目标可见性
+    const occluded = !canSeeTarget(b, targetPos, dist, game.colliders);
 
     const shouldChase = dist < 18 && !occluded;
     b.state = shouldChase ? 'chase' : 'patrol';
