@@ -186,6 +186,7 @@ class MultiplayerClient {
     })
     this.remoteVisualStates = new Map()
     this.internalVisualBridgeBound = false
+    this.eventHandlers = {}
 
     // 初始化反作弊系统
     this.antiCheat = null
@@ -231,17 +232,18 @@ class MultiplayerClient {
           reconnectionDelay: 1000,
           timeout: 10000
         })
+        this.eventHandlers = {}
         this.internalVisualBridgeBound = false
         this.setupVisualStateBridge()
 
-        this.socket.on('connect', () => {
+        this.addEventHandler('__connection', 'connect', () => {
           console.log('✅ 已连接到服务器')
           this.playerId = this.socket.id
           this.isConnected = true
           resolve()
         })
 
-        this.socket.on('disconnect', () => {
+        this.addEventHandler('__connection', 'disconnect', () => {
           console.log('❌ 断开连接')
           this.isConnected = false
           if (this.onDisconnectCallback) {
@@ -249,7 +251,7 @@ class MultiplayerClient {
           }
         })
 
-        this.socket.on('connect_error', (error) => {
+        this.addEventHandler('__connection', 'connect_error', (error) => {
           console.error('=== 连接错误详情 ===')
           console.error('错误类型:', error.type || 'unknown')
           console.error('错误信息:', error.message)
@@ -271,7 +273,7 @@ class MultiplayerClient {
           reject(new Error(errorMsg))
         })
 
-        this.socket.on('error', (error) => {
+        this.addEventHandler('__connection', 'error', (error) => {
           console.error('服务器错误:', error)
           if (this.onErrorCallback) {
             this.onErrorCallback(error)
@@ -299,8 +301,8 @@ class MultiplayerClient {
       this.socket.emit('register', username)
 
       const successHandler = (data) => {
-        this.socket.off('registered', successHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__register', successHandler)
+        this.removeEventHandlers('__register', errorHandler)
 
         if (data.success) {
           this.username = username
@@ -312,17 +314,17 @@ class MultiplayerClient {
       }
 
       const errorHandler = (error) => {
-        this.socket.off('registered', successHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__register', successHandler)
+        this.removeEventHandlers('__register', errorHandler)
         reject(new Error(error))
       }
 
-      this.socket.on('registered', successHandler)
-      this.socket.on('error', errorHandler)
+      this.addEventHandler('__register', 'registered', successHandler)
+      this.addEventHandler('__register', 'error', errorHandler)
 
       setTimeout(() => {
-        this.socket.off('registered', successHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__register', successHandler)
+        this.removeEventHandlers('__register', errorHandler)
         reject(new Error('注册超时'))
       }, 5000)
     })
@@ -338,24 +340,24 @@ class MultiplayerClient {
       this.socket.emit('createRoom', roomName)
 
       const createdHandler = (data) => {
-        this.socket.off('roomCreated', createdHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__createRoom', createdHandler)
+        this.removeEventHandlers('__createRoom', errorHandler)
         this.roomId = data.roomId
         resolve(data)
       }
 
       const errorHandler = (error) => {
-        this.socket.off('roomCreated', createdHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__createRoom', createdHandler)
+        this.removeEventHandlers('__createRoom', errorHandler)
         reject(new Error(error))
       }
 
-      this.socket.on('roomCreated', createdHandler)
-      this.socket.on('error', errorHandler)
+      this.addEventHandler('__createRoom', 'roomCreated', createdHandler)
+      this.addEventHandler('__createRoom', 'error', errorHandler)
 
       setTimeout(() => {
-        this.socket.off('roomCreated', createdHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__createRoom', createdHandler)
+        this.removeEventHandlers('__createRoom', errorHandler)
         reject(new Error('创建房间超时'))
       }, 5000)
     })
@@ -371,24 +373,24 @@ class MultiplayerClient {
       this.socket.emit('joinRoom', roomId)
 
       const joinedHandler = (data) => {
-        this.socket.off('joinedRoom', joinedHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__joinRoom', joinedHandler)
+        this.removeEventHandlers('__joinRoom', errorHandler)
         this.roomId = roomId
         resolve(data)
       }
 
       const errorHandler = (error) => {
-        this.socket.off('joinedRoom', joinedHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__joinRoom', joinedHandler)
+        this.removeEventHandlers('__joinRoom', errorHandler)
         reject(new Error(error))
       }
 
-      this.socket.on('joinedRoom', joinedHandler)
-      this.socket.on('error', errorHandler)
+      this.addEventHandler('__joinRoom', 'joinedRoom', joinedHandler)
+      this.addEventHandler('__joinRoom', 'error', errorHandler)
 
       setTimeout(() => {
-        this.socket.off('joinedRoom', joinedHandler)
-        this.socket.off('error', errorHandler)
+        this.removeEventHandlers('__joinRoom', joinedHandler)
+        this.removeEventHandlers('__joinRoom', errorHandler)
         reject(new Error('加入房间超时'))
       }, 5000)
     })
@@ -670,9 +672,57 @@ class MultiplayerClient {
     this.onDisconnectCallback = callback
   }
 
+  addEventHandler(group, event, handler, originalCallback = handler) {
+    if (!this.socket || typeof handler !== 'function') return
+
+    this.socket.on(event, handler)
+
+    if (!this.eventHandlers[group]) {
+      this.eventHandlers[group] = []
+    }
+
+    this.eventHandlers[group].push({
+      event,
+      handler,
+      originalCallback
+    })
+  }
+
+  removeEventHandlers(group, callback = null) {
+    const handlers = this.eventHandlers[group]
+    if (!Array.isArray(handlers) || handlers.length === 0) return
+
+    const remaining = []
+    for (const entry of handlers) {
+      const shouldRemove = !callback || entry.originalCallback === callback || entry.handler === callback
+
+      if (shouldRemove) {
+        if (this.socket) {
+          this.socket.off(entry.event, entry.handler)
+        }
+      } else {
+        remaining.push(entry)
+      }
+    }
+
+    if (remaining.length > 0) {
+      this.eventHandlers[group] = remaining
+    } else {
+      delete this.eventHandlers[group]
+    }
+  }
+
+  clearAllEventHandlers() {
+    for (const group of Object.keys(this.eventHandlers)) {
+      this.removeEventHandlers(group)
+    }
+    this.eventHandlers = {}
+  }
+
   disconnect() {
     if (this.socket) {
       this.socket.disconnect()
+      this.clearAllEventHandlers()
       this.socket = null
       this.isConnected = false
       this.roomId = null
@@ -688,6 +738,8 @@ class MultiplayerClient {
         weapon: 'rifle',
         alive: true
       })
+    } else {
+      this.eventHandlers = {}
     }
   }
 
