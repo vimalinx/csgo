@@ -1,6 +1,11 @@
 /**
  * CSGO Multiplayer Client
  * Connects to the multiplayer server and handles real-time communication
+ * 
+ * 集成反作弊系统 (2026-03-05):
+ * - 速度检测 (SpeedLimiter)
+ * - 位置验证 (PositionValidator)
+ * - 射击验证 (ShootValidator)
  */
 
 const TEAM_VISUALS = Object.freeze({
@@ -181,7 +186,33 @@ class MultiplayerClient {
     })
     this.remoteVisualStates = new Map()
     this.internalVisualBridgeBound = false
+    
+    // 初始化反作弊系统
+    this.antiCheat = null
+    this.initAntiCheat()
   }
+  
+  /**
+   * 初始化反作弊系统
+   */
+  initAntiCheat() {
+    // 检查是否在浏览器环境且反作弊系统已加载
+    if (typeof window !== 'undefined' && window.AntiCheatSystem) {
+      this.antiCheat = new window.AntiCheatSystem({
+        onViolation: (playerId, type, data) => {
+          console.warn(`[反作弊] 检测到违规: 玩家 ${playerId}, 类型 ${type}`, data)
+        },
+        onWarning: (playerId, warnings) => {
+          console.warn(`[反作弊] 警告: 玩家 ${playerId}, 违规次数 ${warnings.total}`)
+        },
+        onKick: (playerId, action, warnings) => {
+          console.error(`[反作弊] ${action}: 玩家 ${playerId}, 总违规次数 ${warnings.total}`)
+        }
+      })
+      console.log('[反作弊] 系统已初始化')
+    }
+  }
+  
 
   /**
    * Connect to the multiplayer server
@@ -441,6 +472,24 @@ class MultiplayerClient {
    */
   sendMove(position, rotation, velocity, state = {}) {
     if (this.roomId && this.socket && this.isConnected) {
+      // 反作弊检测 - 速度和位置验证
+      if (this.antiCheat && this.playerId) {
+        const antiCheatResult = this.antiCheat.checkMovement(
+          this.playerId,
+          position,
+          {
+            isCrouching: state.isCrouching || false,
+            isRunning: state.isRunning || false,
+            isJumping: state.isJumping || false
+          }
+        )
+        
+        // 如果检测到违规，记录但继续发送（由服务器决定是否拒绝）
+        if (!antiCheatResult.isValid) {
+          console.warn('[反作弊] 移动验证失败', antiCheatResult)
+        }
+      }
+      
       const visualState = this.setLocalVisualState(state)
       this.socket.emit('move', {
         roomId: this.roomId,
@@ -463,6 +512,24 @@ class MultiplayerClient {
    */
   sendShoot(targetPlayerId, weaponType = 'unknown', extra = {}) {
     if (this.roomId && this.socket && this.isConnected) {
+      // 反作弊检测 - 射击验证
+      if (this.antiCheat && this.playerId) {
+        const antiCheatResult = this.antiCheat.checkShoot(
+          this.playerId,
+          {
+            weapon: weaponType,
+            position: extra.position || null,
+            viewAngles: extra.viewAngles || null,
+            targetPosition: extra.targetPosition || null
+          }
+        )
+        
+        // 如果检测到违规，记录但继续发送（由服务器决定是否拒绝）
+        if (!antiCheatResult.valid) {
+          console.warn('[反作弊] 射击验证失败', antiCheatResult)
+        }
+      }
+      
       const payload = {
         roomId: this.roomId,
         targetId: targetPlayerId || null,
