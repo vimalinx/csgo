@@ -1022,28 +1022,6 @@ class SmokeParticleSystem {
     this.particles = initSmokeParticles(this);
   }
 
-/**
- * 约束粒子在边界内
- * @param {Object} particle - 粒子对象
- * @param {Object} system - 烟雾系统实例
- */
-function constrainParticle(particle, system) {
-  // 水平边界约束（圆形）
-  const dx = particle.x - system.pos.x;
-  const dz = particle.z - system.pos.z;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-  if (dist > system.radius) {
-    particle.x = system.pos.x + (dx / dist) * system.radius;
-    particle.z = system.pos.z + (dz / dist) * system.radius;
-    particle.vx *= -0.5;
-    particle.vz *= -0.5;
-  }
-
-  // 高度约束
-  if (particle.y < system.pos.y) particle.y = system.pos.y;
-  if (particle.y > system.pos.y + system.height) particle.y = system.pos.y + system.height;
-}
-
   update(dt) {
     this.timer += dt;
 
@@ -1090,6 +1068,28 @@ function constrainParticle(particle, system) {
     const dist = Math.sqrt(dx * dx + dz * dz);
     return dist < this.radius && point.y >= this.pos.y && point.y <= this.pos.y + this.height;
   }
+}
+
+/**
+ * 约束粒子在边界内
+ * @param {Object} particle - 粒子对象
+ * @param {Object} system - 烟雾系统实例
+ */
+function constrainParticle(particle, system) {
+  // 水平边界约束（圆形）
+  const dx = particle.x - system.pos.x;
+  const dz = particle.z - system.pos.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  if (dist > system.radius) {
+    particle.x = system.pos.x + (dx / dist) * system.radius;
+    particle.z = system.pos.z + (dz / dist) * system.radius;
+    particle.vx *= -0.5;
+    particle.vz *= -0.5;
+  }
+
+  // 高度约束
+  if (particle.y < system.pos.y) particle.y = system.pos.y;
+  if (particle.y > system.pos.y + system.height) particle.y = system.pos.y + system.height;
 }
 
 /**
