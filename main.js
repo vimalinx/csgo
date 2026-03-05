@@ -1818,6 +1818,8 @@ class Game {
     this.grid = Array.from({ length: NAV_GRID_SIZE }, () => Array(NAV_GRID_SIZE).fill(0));
     this.targets = [];
     this.bots = [];
+    this.aliveBotsCache = [];
+    this.aliveBotsCacheDirty = true;
     this.shells = [];
     this.tracers = [];
     this.hitmarker = { t: 0, head: false };
@@ -4953,6 +4955,7 @@ function updateWeapon(dt) {
     game.hitmarker.head = false;
     if (knifeTarget.hp <= 0) {
       knifeTarget.alive = false;
+      game.aliveBotsCacheDirty = true;
       knifeTarget.respawnAt = nowMs() + 2500;
       setStatus('Bot down', false);
       game.stats.kills += 1;
@@ -5173,6 +5176,7 @@ function updateWeapon(dt) {
         spawnDamageNumber(v3(bot.pos.x, bot.pos.y, bot.pos.z), dmg, { crit: isHeadshot, color: zoneFx.color });
         if (bot.hp <= 0) {
           bot.alive = false;
+          game.aliveBotsCacheDirty = true;
           bot.respawnAt = nowMs() + 2500;
           setStatus('Bot down', false);
           game.stats.kills += 1;
@@ -5475,6 +5479,7 @@ function updateTargets(dt) {
     if (!tgt.alive) {
       if (tNow >= tgt.respawnAt) {
         tgt.alive = true;
+        game.aliveBotsCacheDirty = true;
         tgt.hp = tgt.maxHp;
       }
       continue;
@@ -5694,7 +5699,12 @@ function updateBots(dt) {
 
   const tNow = nowMs();
   const playerEye = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
-  const aliveBots = game.bots.filter((x) => x.alive);
+  // Use cached alive bots list to avoid creating new array every frame
+  if (game.aliveBotsCacheDirty) {
+    game.aliveBotsCache = game.bots.filter((x) => x.alive);
+    game.aliveBotsCacheDirty = false;
+  }
+  const aliveBots = game.aliveBotsCache;
   for (const b of game.bots) {
     if (!b.alive) continue;
 
@@ -5964,6 +5974,7 @@ function updateBots(dt) {
             targetBot.hp -= bw.damage;
             if (targetBot.hp <= 0) {
               targetBot.alive = false;
+              game.aliveBotsCacheDirty = true;
               if (game.round.bombPlanted) {
               }
             }
