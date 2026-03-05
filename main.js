@@ -21,6 +21,17 @@ import Radar from './radar.js'
 // Spectator mode import
 import { SPECTATOR_MODE, SpectatorManager, SpectatorUI } from './spectator-mode.js'
 
+// HUD updater import
+import {
+  updateHealthHUD,
+  updateAmmoHUD,
+  updateMoneyHUD,
+  updateRoundHUD,
+  updateScoreboardHUD,
+  updateCrosshairHUD,
+  updateHitmarkerHUD
+} from './hud-updater.js'
+
 // Render utils import
 import { drawHumanoid, drawWeaponPart, drawWeaponPartFwd } from './render-utils.js'
 
@@ -4409,52 +4420,84 @@ function setStatus(text, urgent) {
 }
 
 function updateHud() {
-  // 性能优化：只在HP/护甲变化时更新DOM
-  const currentHp = Math.max(0, Math.floor(game.hp));
-  const currentArmor = Math.max(0, Math.floor(game.armor));
-  
-  if (hudDirtyFlags.health || lastHudValues.hp !== currentHp) {
-    hpText.textContent = String(currentHp);
-    hpBar.style.width = `${clamp01(game.hp / 100) * 100}%`;
-    lastHudValues.hp = currentHp;
-    hudDirtyFlags.health = false;
-  }
-  
-  if (hudDirtyFlags.armor || lastHudValues.armor !== currentArmor) {
-    arText.textContent = String(currentArmor);
-    arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
-    lastHudValues.armor = currentArmor;
-    hudDirtyFlags.armor = false;
-  }
-  
   const w = game.getWeapon();
   
-  // 金钱：降低更新频率
-  const currentMoney = Math.floor(game.econ.money);
-  if (hudDirtyFlags.money || lastHudValues.money !== currentMoney) {
-    if (moneyTextEl) moneyTextEl.textContent = `$${currentMoney}`;
-    lastHudValues.money = currentMoney;
-    hudDirtyFlags.money = false;
-  }
+  // 血量/护甲 HUD
+  updateHealthHUD(
+    { hp: game.hp, armor: game.armor },
+    { hpText, hpBar, arText, arBar },
+    { hudDirtyFlags, lastHudValues }
+  );
   
-  // 弹药：只在变化时更新
-  if (w) {
-    if (hudDirtyFlags.ammo || lastHudValues.ammoMag !== w.mag || lastHudValues.ammoReserve !== w.reserve) {
-      ammoText.textContent = `${w.mag} / ${w.reserve}`;
-      lastHudValues.ammoMag = w.mag;
-      lastHudValues.ammoReserve = w.reserve;
-      hudDirtyFlags.ammo = false;
+  // 金钱 HUD
+  updateMoneyHUD(
+    game.econ.money,
+    { moneyTextEl },
+    { hudDirtyFlags, lastHudValues }
+  );
+  
+  // 弹药 HUD
+  updateAmmoHUD(
+    w,
+    { ammoText, reloadWrap, reloadBar, reloadText },
+    { hudDirtyFlags, lastHudValues }
+  );
+  
+  // 击中标记 HUD
+  updateHitmarkerHUD(
+    game.hitmarker,
+    { hitmarkerEl }
+  );
+  
+  // 存活人数 HUD
+  updateScoreboardHUD(
+    { teamAliveCount },
+    { ctAliveEl, tAliveEl },
+    { hudDirtyFlags }
+  );
+  
+  // 准星 HUD
+  const spread = w ? game.calculateSpread() : 0;
+  updateCrosshairHUD(
+    {
+      vel: game.vel,
+      onGround: game.onGround,
+      crouchT: game.crouchT,
+      landKick: game.landKick,
+      isAiming: game.isAiming,
+      pointerLocked: game.pointerLocked,
+      playerAlive: game.playerAlive
+    },
+    w,
+    spread,
+    { crosshairEl, hud, scopeOverlayEl }
+  );
+  
+  // 回合状态 HUD
+  updateRoundHUD(
+    game.round,
+    {
+      team: game.team,
+      mode: game.mode,
+      econ: game.econ,
+      smoke: game.smoke,
+      flashbang: game.flashbang
+    },
+    { objectiveEl, objectiveText, objectiveTimer, objectiveFill },
+    {
+      weapon: w,
+      calculateSpread: () => game.calculateSpread(),
+      getMovementState: () => game.getMovementState()
     }
-  } else {
-    ammoText.textContent = '-- / --';
-  }
+  );
+  
+  // 射击模式提示（购买菜单、准镜效果等）
   if (fireModeHintEl) {
     const mode = game.fireModeAuto ? 'AUTO' : 'SEMI';
     const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
     const equipLabel = getEquipLabel(game.currentEquip);
     const equipText = equipLabel ? ` · [投掷] ${equipLabel}` : '';
     
-    // 显示倍率
     let scopeText = '';
     if (game.scope.active || game.scope.transitioning) {
       const zoom = game.scope.zoomLevel.toFixed(1);
@@ -4463,82 +4506,8 @@ function updateHud() {
     
     fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}${equipText}${scopeText}`;
   }
-
-  // 存活人数：只在变化时更新
-  if (hudDirtyFlags.aliveCount) {
-    if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
-    if (tAliveEl) tAliveEl.textContent = String(teamAliveCount('t'));
-    hudDirtyFlags.aliveCount = false;
-  }
-
-  const isReloading = !!w && w.reloading;
-  reloadWrap.classList.toggle('show', isReloading);
-  if (isReloading) {
-    const p = clamp01(1 - w.reloadLeft / Math.max(0.0001, w.reloadTotal));
-    reloadBar.style.width = `${p * 100}%`;
-    reloadText.textContent = `Reloading ${Math.ceil(w.reloadLeft * 10) / 10}s`;
-  }
-
-  if (game.hitmarker.t > 0) {
-    hitmarkerEl.classList.add('show');
-    hitmarkerEl.classList.toggle('head', game.hitmarker.head);
-  } else {
-    hitmarkerEl.classList.remove('show');
-    hitmarkerEl.classList.remove('head');
-  }
-
-  // 准星大小基于散布计算
-  const spread = w ? game.calculateSpread() : 0;
-  const speed = Math.hypot(game.vel.x, game.vel.z);
-  const moving = clamp01(speed / 6);
-  const firing = clamp01(w ? w.kick : 0);
-  const crouch = clamp01(game.crouchT);
-  const air = game.onGround ? 0 : 1;
-  const land = clamp01(game.landKick);
   
-  // 准星扩散 = 基础大小 + 散布影响 + 后坐力影响 + 跳跃影响
-  const spreadGap = spread * 4; // 散布对准星的影响
-  const gap = 9 + spreadGap + moving * 12 + firing * 10 - crouch * 6 + air * 16 + land * 14;
-  const len = 8 + moving * 4 + spreadGap * 0.5;
-  const host = crosshairEl || hud;
-  host.style.setProperty('--ch-gap', `${gap.toFixed(1)}px`);
-  host.style.setProperty('--ch-len', `${len.toFixed(1)}px`);
-  const aimingActive = game.isAiming && game.pointerLocked && game.playerAlive;
-  hud.classList.toggle('hud--aiming', aimingActive);
-  if (scopeOverlayEl) scopeOverlayEl.classList.toggle('show', aimingActive);
-
-  const r = game.round;
-  const showObj = game.mode === 'ai';
-  objectiveEl.classList.toggle('hidden', !showObj);
-  
-  // 添加散布信息到 HUD
-  const movementState = game.getMovementState();
-  const spreadValue = w ? game.calculateSpread() : 0;
-  const spreadInfo = w ? `  散布: ${spreadValue.toFixed(2)}° (${movementState})` : '';
-  
-  if (showObj) {
-    const siteLabel = r.activeSite || 'A/B';
-    const plantedLabel = r.plantSite || siteLabel;
-    if (r.state === 'freeze') {
-      objectiveText.textContent = `Freeze ${r.freezeLeft.toFixed(1)}s  $${game.econ.money}`;
-      objectiveTimer.textContent = `Buy: B打开菜单 / 1-0购买枪械 / Q闪 W烟 E甲${spreadInfo}`;
-      objectiveFill.style.width = `${clamp01(r.freezeLeft / Math.max(0.1, r.freezeTotal)) * 100}%`;
-    } else if (r.state === 'post') {
-      objectiveText.textContent = `${(r.winner || '').toUpperCase()} win - ${r.reason}`;
-      objectiveTimer.textContent = `Next round ${r.postLeft.toFixed(1)}s${spreadInfo}`;
-      objectiveFill.style.width = `${clamp01(r.postLeft / Math.max(0.1, r.postTotal)) * 100}%`;
-    } else if (!r.bombPlanted) {
-      objectiveText.textContent = game.team === 't' ? `Plant at ${siteLabel} (E hold)` : `Defend site ${siteLabel}`;
-      objectiveTimer.textContent = `R ${r.roundLeft.toFixed(1)}s  $${game.econ.money}  SMK ${game.smoke.charges}  FLSH ${game.flashbang.charges}${spreadInfo}`;
-      objectiveFill.style.width = `${clamp01(r.progress) * 100}%`;
-    } else {
-      objectiveText.textContent = game.team === 'ct' ? `Defuse ${plantedLabel} (E hold)` : `Bomb planted ${plantedLabel}`;
-      objectiveTimer.textContent = `${Math.max(0, r.bombTimer).toFixed(1)}s  $${game.econ.money}${spreadInfo}`;
-      objectiveFill.style.width = `${clamp01(r.bombTimer / r.bombTotal) * 100}%`;
-    }
-  }
-
-  // 性能优化：只在购买菜单打开时渲染
+  // 购买菜单渲染
   if (game.buyMenuOpen) {
     renderBuyMenu();
   }
