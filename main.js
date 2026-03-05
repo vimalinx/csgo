@@ -18,6 +18,19 @@ import Radar from './radar.js'
 // Spectator mode import
 import { SPECTATOR_MODE, SpectatorManager, SpectatorUI } from './spectator-mode.js'
 
+// 全局错误处理器 - 捕获未处理的异常和Promise rejection
+window.addEventListener('error', (event) => {
+  console.error('全局错误:', event.error)
+  // 防止错误导致游戏崩溃
+  event.preventDefault()
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('未处理的Promise rejection:', event.reason)
+  // 防止错误导致游戏崩溃
+  event.preventDefault()
+})
+
 const canvas = document.getElementById('gl');
 const overlay = document.getElementById('overlay');
 
