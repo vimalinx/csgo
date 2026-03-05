@@ -6629,6 +6629,116 @@ function drawTracer(a, b, color) {
   drawOrientedBox(mid, r, u, f, v3(0.009, 0.009, len), color);
 }
 
+/**
+ * 绘制人形实体（玩家/Bot）
+ * @param {Object} pos - 位置 {x, y, z}
+ * @param {number} yaw - 朝向（弧度）
+ * @param {number} hp - 当前血量
+ * @param {number} maxHp - 最大血量
+ * @param {Object} palette - 颜色调色板 {body, hurt, head, arm, leg, gun}
+ * @param {number} fallT - 倒地动画进度（0-1）
+ * @returns {boolean} 是否可以隐藏（倒地完成）
+ */
+function drawHumanoid(pos, yaw, hp, maxHp, palette, fallT = 0) {
+  const safeMaxHp = Math.max(1, safeNumber(maxHp, 100))
+  const hurt = 1 - clamp01(safeNumber(hp, 0) / safeMaxHp);
+  const baseCol = v3(
+    lerp(palette.body.x, palette.hurt.x, hurt),
+    lerp(palette.body.y, palette.hurt.y, hurt),
+    lerp(palette.body.z, palette.hurt.z, hurt)
+  );
+  const up = v3(0, 1, 0);
+  const fall = clamp01(fallT || 0);
+  const easedFall = easeOutQuad(fall)
+  const bodyHeight = lerp(1.8, 0.3, easedFall)
+  const heightScale = bodyHeight / 1.8
+  const opacity = 1 - easedFall
+  let f = v3norm(forwardFromYawPitch(yaw, 0));
+  const r = v3norm(v3cross(up, f));
+  let u = v3(0, 1, 0);
+
+  if (fall > 0) {
+    const angle = (Math.PI * 0.5) * easedFall
+    const ca = Math.cos(angle)
+    const sa = Math.sin(angle)
+    const baseU = u
+    const baseF = f
+    u = v3norm(v3add(v3scale(baseU, ca), v3scale(baseF, sa)))
+    f = v3norm(v3add(v3scale(baseF, ca), v3scale(baseU, -sa)))
+  }
+
+  const scaleY = (value) => value * heightScale
+  const base = v3(pos.x, pos.y - 0.68 * easedFall, pos.z);
+  const hip = v3add(base, v3(0, scaleY(0.95), 0));
+
+  drawOrientedBox(v3add(hip, v3(0, scaleY(0.25), 0)), r, u, f, v3(0.55, 0.75 * heightScale, 0.3), baseCol, opacity);
+  drawOrientedBox(v3add(hip, v3(0, scaleY(0.78), 0.02)), r, u, f, v3(0.5, 0.45 * heightScale, 0.32), baseCol, opacity);
+
+  const headCol = palette.head;
+  drawOrientedBox(v3add(hip, v3(0, scaleY(1.18), 0.02)), r, u, f, v3(0.32, 0.32 * heightScale, 0.32), headCol, opacity);
+
+  const armCol = palette.arm;
+  drawOrientedBox(v3add(hip, v3(0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
+  drawOrientedBox(v3add(hip, v3(-0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
+
+  const legCol = palette.leg;
+  drawOrientedBox(v3add(base, v3(0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
+  drawOrientedBox(v3add(base, v3(-0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
+
+  const gunCol = palette.gun;
+  drawOrientedBox(v3add(hip, v3(0.18, scaleY(0.78), 0.48)), r, u, f, v3(0.16, 0.12 * heightScale, 0.62), gunCol, opacity);
+  return fall >= 1
+}
+
+/**
+ * 绘制武器部件
+ * @param {Object} wmOrigin - 武器模型原点
+ * @param {Object} camRight - 摄像机右向量
+ * @param {Object} camUp - 摄像机上向量
+ * @param {Object} fwd - 前向向量
+ * @param {Object} swayRight - 摇摆右向量
+ * @param {Object} swayUp - 摇摆上向量
+ * @param {Object} swayFwd - 摇摆前向量
+ * @param {Object} localPos - 局部位置 {x, y, z}
+ * @param {Object} partScale - 部件尺寸 {x, y, z}
+ * @param {Object} color - 颜色 {x, y, z}
+ */
+function drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, localPos, partScale, color) {
+  const p = v3add(
+    wmOrigin,
+    v3add(
+      v3add(v3scale(camRight, localPos.x), v3scale(camUp, localPos.y)),
+      v3scale(fwd, localPos.z)
+    )
+  );
+  drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
+}
+
+/**
+ * 绘制武器部件（带前向偏移）
+ * @param {Object} wmOrigin - 武器模型原点
+ * @param {Object} camRight - 摄像机右向量
+ * @param {Object} camUp - 摄像机上向量
+ * @param {Object} fwd - 前向向量
+ * @param {Object} swayRight - 摇摆右向量
+ * @param {Object} swayUp - 摇摆上向量
+ * @param {Object} swayFwd - 摇摆前向量
+ * @param {Object} localPos - 局部位置 {x, y, z}
+ * @param {Object} partScale - 部件尺寸 {x, y, z}
+ * @param {Object} color - 颜色 {x, y, z}
+ * @param {number} fwdExtra - 前向额外偏移
+ */
+function drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, localPos, partScale, color, fwdExtra) {
+  const p = v3add(
+    wmOrigin,
+    v3add(
+      v3add(v3scale(camRight, localPos.x), v3scale(camUp, localPos.y)),
+      v3scale(fwd, localPos.z + fwdExtra)
+    )
+  );
+  drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
+}
+
 function drawWorld() {
   glsys.resize();
   const aspect = glsys.width / Math.max(1, glsys.height);
@@ -6749,57 +6859,6 @@ function drawWorld() {
         drawBox(v3(s.pos.x, s.pos.y + 0.95, s.pos.z), v3(s.scale.x * 0.7, s.scale.y * 0.6, s.scale.z * 0.7), v3(0.78, 0.8, 0.84));
       }
     }
-  }
-
-  function drawHumanoid(pos, yaw, hp, maxHp, palette, fallT = 0) {
-    const safeMaxHp = Math.max(1, safeNumber(maxHp, 100))
-    const hurt = 1 - clamp01(safeNumber(hp, 0) / safeMaxHp);
-    const baseCol = v3(
-      lerp(palette.body.x, palette.hurt.x, hurt),
-      lerp(palette.body.y, palette.hurt.y, hurt),
-      lerp(palette.body.z, palette.hurt.z, hurt)
-    );
-    const up = v3(0, 1, 0);
-    const fall = clamp01(fallT || 0);
-    const easedFall = easeOutQuad(fall)
-    const bodyHeight = lerp(1.8, 0.3, easedFall)
-    const heightScale = bodyHeight / 1.8
-    const opacity = 1 - easedFall
-    let f = v3norm(forwardFromYawPitch(yaw, 0));
-    const r = v3norm(v3cross(up, f));
-    let u = v3(0, 1, 0);
-
-    if (fall > 0) {
-      const angle = (Math.PI * 0.5) * easedFall
-      const ca = Math.cos(angle)
-      const sa = Math.sin(angle)
-      const baseU = u
-      const baseF = f
-      u = v3norm(v3add(v3scale(baseU, ca), v3scale(baseF, sa)))
-      f = v3norm(v3add(v3scale(baseF, ca), v3scale(baseU, -sa)))
-    }
-
-    const scaleY = (value) => value * heightScale
-    const base = v3(pos.x, pos.y - 0.68 * easedFall, pos.z);
-    const hip = v3add(base, v3(0, scaleY(0.95), 0));
-
-    drawOrientedBox(v3add(hip, v3(0, scaleY(0.25), 0)), r, u, f, v3(0.55, 0.75 * heightScale, 0.3), baseCol, opacity);
-    drawOrientedBox(v3add(hip, v3(0, scaleY(0.78), 0.02)), r, u, f, v3(0.5, 0.45 * heightScale, 0.32), baseCol, opacity);
-
-    const headCol = palette.head;
-    drawOrientedBox(v3add(hip, v3(0, scaleY(1.18), 0.02)), r, u, f, v3(0.32, 0.32 * heightScale, 0.32), headCol, opacity);
-
-    const armCol = palette.arm;
-    drawOrientedBox(v3add(hip, v3(0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
-    drawOrientedBox(v3add(hip, v3(-0.42, scaleY(0.78), 0.02)), r, u, f, v3(0.18, 0.55 * heightScale, 0.18), armCol, opacity);
-
-    const legCol = palette.leg;
-    drawOrientedBox(v3add(base, v3(0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
-    drawOrientedBox(v3add(base, v3(-0.18, scaleY(0.45), 0)), r, u, f, v3(0.22, 0.9 * heightScale, 0.22), legCol, opacity);
-
-    const gunCol = palette.gun;
-    drawOrientedBox(v3add(hip, v3(0.18, scaleY(0.78), 0.48)), r, u, f, v3(0.16, 0.12 * heightScale, 0.62), gunCol, opacity);
-    return fall >= 1
   }
 
   for (const bot of game.bots) {
@@ -6970,28 +7029,6 @@ function drawWorld() {
     )
   );
 
-  function drawWeaponPart(localPos, partScale, color) {
-    const p = v3add(
-      wmOrigin,
-      v3add(
-        v3add(v3scale(camRight, localPos.x), v3scale(camUp, localPos.y)),
-        v3scale(fwd, localPos.z)
-      )
-    );
-    drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
-  }
-
-  function drawWeaponPartFwd(localPos, partScale, color, fwdExtra) {
-    const p = v3add(
-      wmOrigin,
-      v3add(
-        v3add(v3scale(camRight, localPos.x), v3scale(camUp, localPos.y)),
-        v3scale(fwd, localPos.z + fwdExtra)
-      )
-    );
-    drawOrientedBox(p, swayRight, swayUp, swayFwd, partScale, color);
-  }
-
   const currentEquip = typeof game.currentEquip === 'string' ? game.currentEquip : 'none';
   if (currentEquip !== 'none') {
     // 根据投掷物类型设置颜色
@@ -7040,15 +7077,15 @@ function drawWorld() {
 
     const slide = w.shot * 0.08;
 
-    drawWeaponPart(v3(0.0, -0.02, 0.0), v3(0.22, 0.12, 0.55), metal);
-    drawWeaponPartFwd(v3(0.0, -0.08, 0.12), v3(0.2, 0.08, 0.28), metal, -slide);
-    drawWeaponPartFwd(v3(0.0, -0.02, 0.38), v3(0.12, 0.08, 0.32), metal, -slide);
-    drawWeaponPart(v3(0.0, -0.16, 0.08), v3(0.12, 0.22, 0.18), dark);
-    drawWeaponPart(v3(0.0, -0.02, 0.46), v3(0.06, 0.06, 0.14), accent);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.0), v3(0.22, 0.12, 0.55), metal);
+    drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.08, 0.12), v3(0.2, 0.08, 0.28), metal, -slide);
+    drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.38), v3(0.12, 0.08, 0.32), metal, -slide);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.16, 0.08), v3(0.12, 0.22, 0.18), dark);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.46), v3(0.06, 0.06, 0.14), accent);
 
     if (w.flash > 0.001) {
       const flash = v3(lerp(0.9, 1.0, w.flash), lerp(0.75, 0.95, w.flash), 0.2);
-      drawWeaponPart(v3(0.0, -0.02, 0.56), v3(0.09, 0.09, 0.12), flash);
+      drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.02, 0.56), v3(0.09, 0.09, 0.12), flash);
     }
   } else {
     const dark = v3(0.14, 0.16, 0.18);
@@ -7058,16 +7095,16 @@ function drawWorld() {
 
     const bolt = w.shot * 0.06;
 
-    drawWeaponPart(v3(0.0, 0.0, 0.0), v3(0.22, 0.12, 0.95), metal);
-    drawWeaponPart(v3(0.0, -0.1, 0.18), v3(0.16, 0.22, 0.24), dark);
-    drawWeaponPart(v3(0.0, -0.16, 0.18), v3(0.1, 0.32, 0.12), dark);
-    drawWeaponPart(v3(0.0, -0.04, 0.62), v3(0.1, 0.08, 0.7), metal);
-    drawWeaponPart(v3(0.0, 0.04, 0.42), v3(0.24, 0.08, 0.28), wood);
-    drawWeaponPartFwd(v3(0.0, 0.02, 0.78), v3(0.06, 0.06, 0.12), accent, -bolt);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, 0.0, 0.0), v3(0.22, 0.12, 0.95), metal);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.1, 0.18), v3(0.16, 0.22, 0.24), dark);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.16, 0.18), v3(0.1, 0.32, 0.12), dark);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.04, 0.62), v3(0.1, 0.08, 0.7), metal);
+    drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, 0.04, 0.42), v3(0.24, 0.08, 0.28), wood);
+    drawWeaponPartFwd(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, 0.02, 0.78), v3(0.06, 0.06, 0.12), accent, -bolt);
 
     if (w.flash > 0.001) {
       const flash = v3(lerp(0.95, 1.0, w.flash), lerp(0.8, 0.98, w.flash), 0.25);
-      drawWeaponPart(v3(0.0, -0.01, 0.98), v3(0.12, 0.1, 0.16), flash);
+      drawWeaponPart(wmOrigin, camRight, camUp, fwd, swayRight, swayUp, swayFwd, v3(0.0, -0.01, 0.98), v3(0.12, 0.1, 0.16), flash);
     }
   }
 
