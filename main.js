@@ -4861,7 +4861,8 @@ const SWIPE_MAX_VERTICAL_DRIFT = 72;
 let swipeStartX = 0;
 let swipeStartY = 0;
 
-overlay.addEventListener(
+globalEventManager.add(
+  overlay,
   'touchstart',
   (e) => {
     if (game.pointerLocked || !e.touches || e.touches.length !== 1) return;
@@ -4869,10 +4870,12 @@ overlay.addEventListener(
     swipeStartX = t.clientX;
     swipeStartY = t.clientY;
   },
-  { passive: true }
+  { passive: true },
+  'canvas' // 命名空间：canvas
 );
 
-overlay.addEventListener(
+globalEventManager.add(
+  overlay,
   'touchend',
   (e) => {
     if (game.pointerLocked || !e.changedTouches || e.changedTouches.length !== 1) return;
@@ -4883,7 +4886,8 @@ overlay.addEventListener(
     if (Math.abs(dy) > SWIPE_MAX_VERTICAL_DRIFT) return;
     swipeToScreen(dx < 0 ? 1 : -1);
   },
-  { passive: true }
+  { passive: true },
+  'canvas' // 命名空间：canvas
 );
 
 // 使用事件管理器注册 window blur - 防止内存泄漏
@@ -4905,62 +4909,130 @@ globalEventManager.add(
   'window' // 命名空间：window
 );
 
-btnModeAI.addEventListener('click', () => {
-  showScreen('ai');
-});
-
-btnModeOnline.addEventListener('click', () => {
-  startOnlineMode();
-});
-
-btnBackToLobby.addEventListener('click', () => {
-  showScreen('lobby');
-});
-
-btnStartAI.addEventListener('click', () => {
-  audio.ensure();
-  startAIMode();
-});
-
-btnLobbySettings.addEventListener('click', () => {
-  game.showingSettingsFrom = 'lobby';
-  showScreen('settings');
-});
-
-btnPauseSettings.addEventListener('click', () => {
-  game.showingSettingsFrom = 'pause';
-  showScreen('settings');
-});
-
-btnSettingsBack.addEventListener('click', () => {
-  showScreen(game.showingSettingsFrom === 'pause' ? 'pause' : 'lobby');
-});
-
-btnResume.addEventListener('click', () => {
-  if (game.mode === 'ai') lockPointer();
-});
-
-btnRestart.addEventListener('click', () => {
-  if (game.mode === 'ai') {
-    startAIMode();
-  }
-});
+globalEventManager.add(
+  btnModeAI,
+  'click',
+  () => {
+    showScreen('ai');
   },
   {},
   'document' // 命名空间：document
 );
 
-btnReturnLobby.addEventListener('click', () => {
-  returnToLobby();
-});
+globalEventManager.add(
+  btnModeOnline,
+  'click',
+  () => {
+    startOnlineMode();
+  },
+  {},
+  'document' // 命名空间：document
+);
 
-btnResultLobby.addEventListener('click', () => {
-  returnToLobby();
-});
+globalEventManager.add(
+  btnBackToLobby,
+  'click',
+  () => {
+    showScreen('lobby');
+  },
+  {},
+  'document' // 命名空间：document
+);
 
-btnResultRestart.addEventListener('click', () => {
-  if (game.mode === 'ai') startAIMode();
-});
+globalEventManager.add(
+  btnStartAI,
+  'click',
+  () => {
+    audio.ensure();
+    startAIMode();
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnLobbySettings,
+  'click',
+  () => {
+    game.showingSettingsFrom = 'lobby';
+    showScreen('settings');
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnPauseSettings,
+  'click',
+  () => {
+    game.showingSettingsFrom = 'pause';
+    showScreen('settings');
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnSettingsBack,
+  'click',
+  () => {
+    showScreen(game.showingSettingsFrom === 'pause' ? 'pause' : 'lobby');
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnResume,
+  'click',
+  () => {
+    if (game.mode === 'ai') lockPointer();
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnRestart,
+  'click',
+  () => {
+    if (game.mode === 'ai') {
+      startAIMode();
+    }
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnReturnLobby,
+  'click',
+  () => {
+    returnToLobby();
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnResultLobby,
+  'click',
+  () => {
+    returnToLobby();
+  },
+  {},
+  'document' // 命名空间：document
+);
+
+globalEventManager.add(
+  btnResultRestart,
+  'click',
+  () => {
+    if (game.mode === 'ai') startAIMode();
+  },
+  {},
+  'document' // 命名空间：document
+);
 
 function setActiveOption(group, value) {
   for (const [v, el] of Object.entries(group)) {
@@ -4993,15 +5065,15 @@ function setMatchMode(_value) {
   setActiveOption(modeButtons, 'bomb');
 }
 
-teamCT.addEventListener('click', () => setTeam('ct'));
-teamT.addEventListener('click', () => setTeam('t'));
-diffEasy.addEventListener('click', () => setDifficulty('easy'));
-diffNormal.addEventListener('click', () => setDifficulty('normal'));
-diffHard.addEventListener('click', () => setDifficulty('hard'));
-botMinus.addEventListener('click', () => setBotCount(game.botCount - 1));
-botPlus.addEventListener('click', () => setBotCount(game.botCount + 1));
+globalEventManager.add(teamCT, 'click', () => setTeam('ct'), {}, 'document');
+globalEventManager.add(teamT, 'click', () => setTeam('t'), {}, 'document');
+globalEventManager.add(diffEasy, 'click', () => setDifficulty('easy'), {}, 'document');
+globalEventManager.add(diffNormal, 'click', () => setDifficulty('normal'), {}, 'document');
+globalEventManager.add(diffHard, 'click', () => setDifficulty('hard'), {}, 'document');
+globalEventManager.add(botMinus, 'click', () => setBotCount(game.botCount - 1), {}, 'document');
+globalEventManager.add(botPlus, 'click', () => setBotCount(game.botCount + 1), {}, 'document');
 
-if (modeBomb) modeBomb.addEventListener('click', () => setMatchMode('bomb'));
+if (modeBomb) globalEventManager.add(modeBomb, 'click', () => setMatchMode('bomb'), {}, 'document');
 
 function setStepValue(textEl, next) {
   textEl.textContent = String(next);
@@ -5021,12 +5093,12 @@ function applyVolumesFromUI() {
   audio.setVolumes(m, s, mu);
 }
 
-volMasterMinus.addEventListener('click', () => stepVolume(volMasterText, -5));
-volMasterPlus.addEventListener('click', () => stepVolume(volMasterText, 5));
-volSfxMinus.addEventListener('click', () => stepVolume(volSfxText, -5));
-volSfxPlus.addEventListener('click', () => stepVolume(volSfxText, 5));
-volMusicMinus.addEventListener('click', () => stepVolume(volMusicText, -5));
-volMusicPlus.addEventListener('click', () => stepVolume(volMusicText, 5));
+globalEventManager.add(volMasterMinus, 'click', () => stepVolume(volMasterText, -5), {}, 'document');
+globalEventManager.add(volMasterPlus, 'click', () => stepVolume(volMasterText, 5), {}, 'document');
+globalEventManager.add(volSfxMinus, 'click', () => stepVolume(volSfxText, -5), {}, 'document');
+globalEventManager.add(volSfxPlus, 'click', () => stepVolume(volSfxText, 5), {}, 'document');
+globalEventManager.add(volMusicMinus, 'click', () => stepVolume(volMusicText, -5), {}, 'document');
+globalEventManager.add(volMusicPlus, 'click', () => stepVolume(volMusicText, 5), {}, 'document');
 
 setTeam('ct');
 setDifficulty('normal');
