@@ -45,6 +45,78 @@ const WEAPON_ICON_MAP = Object.freeze({
 
 const DEFAULT_DEATH_ANIM_DURATION = 1000
 
+function defaultRequestFrame(callback) {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.requestAnimationFrame === 'function') {
+    return globalThis.requestAnimationFrame(callback)
+  }
+  return setTimeout(() => callback(Date.now()), 16)
+}
+
+function defaultCancelFrame(frameId) {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.cancelAnimationFrame === 'function') {
+    globalThis.cancelAnimationFrame(frameId)
+    return
+  }
+  clearTimeout(frameId)
+}
+
+export class RenderThrottler {
+  constructor(renderFn, options = {}) {
+    if (typeof renderFn !== 'function') {
+      throw new Error('RenderThrottler: renderFn must be a function')
+    }
+
+    this.renderFn = renderFn
+    this.requestFrame = typeof options.requestFrame === 'function' ? options.requestFrame : defaultRequestFrame
+    this.cancelFrame = typeof options.cancelFrame === 'function' ? options.cancelFrame : defaultCancelFrame
+    this.pendingRender = false
+    this.rafId = null
+    this.lastArgs = []
+    this.hasArgs = false
+  }
+
+  requestRender(...args) {
+    this.lastArgs = args
+    this.hasArgs = true
+
+    if (this.pendingRender) return
+    this.pendingRender = true
+
+    this.rafId = this.requestFrame(() => {
+      this.pendingRender = false
+      this.rafId = null
+
+      if (!this.hasArgs) return
+
+      const renderArgs = this.lastArgs
+      this.lastArgs = []
+      this.hasArgs = false
+      this.renderFn(...renderArgs)
+    })
+  }
+
+  cancelRender() {
+    if (this.rafId !== null) {
+      this.cancelFrame(this.rafId)
+      this.rafId = null
+    }
+    this.pendingRender = false
+    this.lastArgs = []
+    this.hasArgs = false
+  }
+
+  flush() {
+    if (!this.hasArgs) return
+    const renderArgs = this.lastArgs
+    this.cancelRender()
+    this.renderFn(...renderArgs)
+  }
+
+  isRenderPending() {
+    return this.pendingRender
+  }
+}
+
 function clampNumber(value, min, max, fallback) {
   const number = Number(value)
   if (!Number.isFinite(number)) {

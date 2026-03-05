@@ -3,7 +3,7 @@
  * Vanilla JavaScript UI components for multiplayer functionality
  */
 
-import { getTeamVisual, getWeaponIcon, normalizePlayerVisualData } from './multiplayer.js'
+import { getTeamVisual, getWeaponIcon, normalizePlayerVisualData, RenderThrottler } from './multiplayer.js'
 
 const PLAYER_HEALTH_BAR_MAX_HP = 100
 const playerHealthBars = new Map()
@@ -756,6 +756,10 @@ export function createPlayerVisualizationSystem(options = {}) {
 
   const ctx = uiCanvas.getContext('2d')
   let enabled = true
+  let latestPlayers = null
+  const renderThrottler = new RenderThrottler(() => {
+    renderNow(latestPlayers)
+  })
 
   function syncSize() {
     if (!uiCanvas) return
@@ -768,6 +772,7 @@ export function createPlayerVisualizationSystem(options = {}) {
   }
 
   function clear() {
+    renderThrottler.cancelRender()
     if (!ctx || !uiCanvas) return
     syncSize()
     ctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height)
@@ -870,7 +875,7 @@ export function createPlayerVisualizationSystem(options = {}) {
     ctx.restore()
   }
 
-  function render(players) {
+  function renderNow(players) {
     if (!ctx || !uiCanvas) return
     syncSize()
     ctx.clearRect(0, 0, uiCanvas.width, uiCanvas.height)
@@ -882,7 +887,13 @@ export function createPlayerVisualizationSystem(options = {}) {
     }
   }
 
+  function render(players) {
+    latestPlayers = players
+    renderThrottler.requestRender()
+  }
+
   function destroy() {
+    renderThrottler.cancelRender()
     clear()
     if (uiCanvas && uiCanvas.parentElement) {
       uiCanvas.parentElement.removeChild(uiCanvas)
@@ -891,9 +902,14 @@ export function createPlayerVisualizationSystem(options = {}) {
   }
 
   function setEnabled(nextEnabled) {
+    const wasEnabled = enabled
     enabled = Boolean(nextEnabled)
     if (!enabled) {
       clear()
+      return
+    }
+    if (!wasEnabled && latestPlayers !== null) {
+      renderThrottler.requestRender()
     }
   }
 

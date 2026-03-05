@@ -9,7 +9,7 @@
  * - 可切换大小（Tab键）
  */
 
-import { normalizeTeam, TEAM_COLORS } from './multiplayer.js'
+import { normalizeTeam, TEAM_COLORS, RenderThrottler } from './multiplayer.js'
 
 export const RADAR_SIZES = {
   SMALL: 200,
@@ -36,6 +36,10 @@ export default class Radar {
       throw new Error('Radar 2D canvas unavailable')
     }
 
+    this.renderThrottler = new RenderThrottler(() => {
+      this.renderNow()
+    })
+
     this.setSize(this.currentSize)
     host.appendChild(this.canvas)
     this.bindEvents()
@@ -48,6 +52,7 @@ export default class Radar {
   setSize(size) {
     if (size === 0) {
       this.visible = false
+      this.renderThrottler.cancelRender()
       this.canvas.classList.add('hidden')
       return
     }
@@ -272,7 +277,7 @@ export default class Radar {
     this.ctx.stroke()
   }
 
-  render() {
+  renderNow() {
     if (!this.visible || this.size === 0) return
 
     const ctx = this.ctx
@@ -381,5 +386,13 @@ export default class Radar {
     ctx.textAlign = 'right'
     ctx.textBaseline = 'bottom'
     ctx.fillText(`[${this.size}px] [Tab 切换]`, this.size - 8, this.size - 8)
+  }
+
+  render() {
+    if (!this.visible || this.size === 0) {
+      this.renderThrottler.cancelRender()
+      return
+    }
+    this.renderThrottler.requestRender()
   }
 }
