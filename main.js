@@ -3800,25 +3800,93 @@ function updateMultiplayerScoreboard() {
 
 /**
  * Send player movement to server (called from game loop)
+ * 优化版本：自适应网络同步
+ * - 根据移动状态动态调整发送频率
+ * - 静止时降低频率（200ms / 5 FPS）
+ * - 步行时中等频率（100ms / 10 FPS）
+ * - 奔跑时标准频率（50ms / 20 FPS）
+ * - 战斗时高频率（33ms / 30 FPS）
  */
+const NETWORK_CONFIG = {
+  IDLE_INTERVAL: 200,
+  WALK_INTERVAL: 100,
+  RUN_INTERVAL: 50,
+  COMBAT_INTERVAL: 33,
+  WALK_SPEED_THRESHOLD: 1.5,
+  RUN_SPEED_THRESHOLD: 4.0,
+  POSITION_THRESHOLD: 0.05,
+  YAW_THRESHOLD: 0.01,
+  PITCH_THRESHOLD: 0.01
+}
+
 let lastMoveSendTime = 0
-const MOVE_SEND_INTERVAL = 50 // Send every 50ms (20 times per second)
+let lastSyncPos = null
+let lastSyncYaw = 0
+let lastSyncPitch = 0
+let lastFireTime = 0
+
+function getMoveSpeed(vel) {
+  if (!vel) return 0
+  const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z)
+  return Math.abs(speed)
+}
+
+function getPositionDelta(currentPos, lastPos) {
+  if (!currentPos || !lastPos) return Infinity
+  const dx = currentPos.x - lastPos.x
+  const dz = currentPos.z - lastPos.z
+  return Math.sqrt(dx * dx + dz * dz)
+}
+
+function getRotationDelta(currentYaw, currentPitch, lastYaw, lastPitch) {
+  const yawDelta = Math.abs(currentYaw - lastYaw)
+  const pitchDelta = Math.abs(currentPitch - lastPitch)
+  return Math.sqrt(yawDelta * yawDelta + pitchDelta * pitchDelta)
+}
+
+function checkCombatMode() {
+  const now = Date.now()
+  const recentFire = (now - lastFireTime) < 3000
+  return recentFire
+}
+
+function getSyncInterval(moveSpeed, isCombat) {
+  if (isCombat) return NETWORK_CONFIG.COMBAT_INTERVAL
+  if (moveSpeed >= NETWORK_CONFIG.RUN_SPEED_THRESHOLD) return NETWORK_CONFIG.RUN_INTERVAL
+  if (moveSpeed >= NETWORK_CONFIG.WALK_SPEED_THRESHOLD) return NETWORK_CONFIG.WALK_INTERVAL
+  return NETWORK_CONFIG.IDLE_INTERVAL
+}
+
+function shouldForceSync(pos, yaw, pitch) {
+  if (!lastSyncPos) return true
+  const posDelta = getPositionDelta(pos, lastSyncPos)
+  const rotDelta = getRotationDelta(yaw, pitch, lastSyncYaw, lastSyncPitch)
+  return (
+    posDelta >= NETWORK_CONFIG.POSITION_THRESHOLD ||
+    rotDelta >= Math.sqrt(NETWORK_CONFIG.YAW_THRESHOLD ** 2 + NETWORK_CONFIG.PITCH_THRESHOLD ** 2)
+  )
+}
 
 function sendPlayerMovement() {
-  // 安全检查
   if (!multiplayer || !multiplayer.isConnected || game.mode !== 'online') return
-
-  // 检查玩家是否初始化
   if (!game.player || !game.player.pos) {
     console.warn('⚠️ Player not initialized, skip movement sync')
     return
   }
-  
+
   const now = Date.now()
-  if (now - lastMoveSendTime < MOVE_SEND_INTERVAL) return
-  
+  const moveSpeed = getMoveSpeed(game.vel)
+  const inCombat = checkCombatMode()
+  const syncInterval = getSyncInterval(moveSpeed, inCombat)
+  const forceSync = shouldForceSync(game.player.pos, game.yaw, game.pitch)
+
+  if (!forceSync && now - lastMoveSendTime < syncInterval) return
+
   lastMoveSendTime = now
-  
+  lastSyncPos = { ...game.player.pos }
+  lastSyncYaw = game.yaw
+  lastSyncPitch = game.pitch
+
   try {
     const weapon = game.getWeapon()
     multiplayer.sendMove(
@@ -3835,6 +3903,18 @@ function sendPlayerMovement() {
   } catch (error) {
     console.error('Failed to send movement:', error)
   }
+}
+
+function recordFireTime() {
+  lastFireTime = Date.now()
+}
+
+function resetNetworkSync() {
+  lastMoveSendTime = 0
+  lastSyncPos = null
+  lastSyncYaw = 0
+  lastSyncPitch = 0
+  lastFireTime = 0
 }
 
 const glsys = new GL(canvas);
@@ -4827,6 +4907,7 @@ function updateWeapon(dt) {
 
     knifeTarget.hp -= 50;
     audio.hit();
+    recordFireTime();
     game.lastStatusAt = nowMs();
     game.hitmarker.t = 0.12;
     game.hitmarker.head = false;
@@ -5029,6 +5110,7 @@ function updateWeapon(dt) {
         headshot: isHeadshot
       });
       audio.hit();
+      recordFireTime();
       game.lastStatusAt = nowMs();
       game.hitmarker.t = 0.12;
       game.hitmarker.head = isHeadshot;
@@ -5043,6 +5125,7 @@ function updateWeapon(dt) {
       } else {
         bot.hp -= dmg;
         audio.hit();
+        recordFireTime();
         game.lastStatusAt = nowMs();
         game.hitmarker.t = 0.12;
         game.hitmarker.head = isHeadshot;
