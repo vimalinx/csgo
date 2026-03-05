@@ -2210,10 +2210,159 @@ let lastTargetUpdateTime = 0;
 const BOT_UPDATE_INTERVAL = 16; // 16ms (约60fps)
 const TARGET_UPDATE_INTERVAL = 8; // 8ms (更高频率)
 
+// Web Worker for Bot AI
+let botWorker = null;
+let botWorkerReady = false;
+let pendingBotUpdate = false;
+let workerPerformanceMonitor = {
+  workerTime: 0,
+  mainThreadTime: 0,
+  frameCount: 0
+};
+
+// 初始化 Bot Worker
+function initBotWorker() {
+  try {
+    botWorker = new Worker('bot-worker.js');
+    
+    botWorker.onmessage = function(e) {
+      const { type, data, workerTime } = e.data;
+      
+      if (type === 'result') {
+        // 应用 Worker 返回的结果
+        applyBotUpdateResults(data);
+        
+        // 性能监控
+        workerPerformanceMonitor.workerTime = workerTime;
+        workerPerformanceMonitor.frameCount++;
+        
+        pendingBotUpdate = false;
+      }
+    };
+    
+    botWorker.onerror = function(error) {
+      console.error('Bot Worker 错误:', error);
+      botWorkerReady = false;
+      // Worker 失败，回退到主线程
+      console.warn('回退到主线程 Bot AI');
+    };
+    
+    botWorkerReady = true;
+    console.log('Bot Worker 初始化成功');
+  } catch (error) {
+    console.error('Bot Worker 初始化失败:', error);
+    botWorkerReady = false;
+  }
+}
+
+// 应用 Worker 返回的结果
+function applyBotUpdateResults(result) {
+  const { bots, events } = result;
+  
+  // 性能监控（每 60 帧输出一次）
+  if (workerPerformanceMonitor.frameCount % 60 === 0) {
+    console.log(`[Worker 性能] Worker: ${workerPerformanceMonitor.workerTime.toFixed(2)}ms, 主线程: ${workerPerformanceMonitor.mainThreadTime.toFixed(2)}ms`);
+  }
+  
+  // 更新 bot 状态
+  for (const updatedBot of bots) {
+    const originalBot = game.bots.find(b => b.id === updatedBot.id);
+    if (originalBot) {
+      // 只更新可变状态
+      originalBot.pos = updatedBot.pos;
+      originalBot.vel = updatedBot.vel;
+      originalBot.yaw = updatedBot.yaw;
+      originalBot.state = updatedBot.state;
+      originalBot.shootCooldown = updatedBot.shootCooldown;
+      originalBot.weapon = updatedBot.weapon;
+      originalBot.navPath = updatedBot.navPath;
+      originalBot.navIndex = updatedBot.navIndex;
+      originalBot.navGoal = updatedBot.navGoal;
+      originalBot.firstSawEnemyTime = updatedBot.firstSawEnemyTime;
+      originalBot.objectiveSite = updatedBot.objectiveSite;
+      originalBot.patrolNode = updatedBot.patrolNode;
+      originalBot.alive = updatedBot.alive;
+      originalBot.hp = updatedBot.hp;
+    }
+  }
+  
+  // 处理事件
+  for (const event of events) {
+    switch (event.type) {
+      case 'shoot':
+        // 在主线程创建曳光弹
+        const botTracer = obtainTracer();
+        botTracer.a = event.muzzle;
+        botTracer.b = event.end;
+        botTracer.travel = 0;
+        botTracer.speed = 95;
+        botTracer.life = 0.32;
+        botTracer.hue = event.hue;
+        game.tracers.push(botTracer);
+        break;
+        
+      case 'damagePlayer':
+        // 处理玩家伤害
+        if (game.team === game.bots.find(b => b.id === event.botId)?.team) {
+          break; // 友军伤害
+        }
+        const botDamage = event.damage;
+        let actualDamage = botDamage;
+        const hasArmor = game.armor > 0;
+        if (hasArmor && botDamage > 0) {
+          const armorAbsorb = Math.min(game.armor, botDamage * 0.3);
+          actualDamage = botDamage - armorAbsorb;
+          game.armor = Math.max(0, game.armor - armorAbsorb * 0.5);
+        }
+        game.hp -= actualDamage;
+        if (game.hp <= 0) {
+          if (game.mode === 'online') {
+            handleLocalPlayerDeath('You died');
+          } else {
+            game.playerAlive = false;
+            game.hp = 0;
+            game.vel = v3(0, 0, 0);
+            setStatus('You died', true);
+            game.stats.deaths += 1;
+          }
+        } else {
+          setStatus('Hit by bot', true);
+        }
+        break;
+        
+      case 'botDied':
+        // 更新缓存标记
+        game.aliveBotsCacheDirty = true;
+        break;
+        
+      case 'setActiveSite':
+        if (!game.round.activeSite) {
+          game.round.activeSite = event.siteKey;
+        }
+        break;
+        
+      case 'setRoundSite':
+        setRoundSite(event.site);
+        break;
+        
+      case 'tPlanting':
+        game.round.tPlanting = event.value;
+        break;
+        
+      case 'ctDefusing':
+        game.round.ctDefusing = event.value;
+        break;
+    }
+  }
+}
+
 const game = new Game();
 const radar = new Radar(hud, game);
 ensureRadarActive();
 resetPlayerLoadout();
+
+// 初始化 Bot Worker
+initBotWorker();
 
 // Spectator mode initialization
 const spectatorManager = new SpectatorManager(game, null);
@@ -5876,6 +6025,52 @@ function updateBots(dt) {
   lastBotUpdateTime = now;
   
   if (isRoundFrozen()) return;
+  
+  // 如果 Worker 不可用或正在处理上一帧，回退到主线程
+  if (!botWorkerReady || pendingBotUpdate) {
+    updateBotsMainThread(dt);
+    return;
+  }
+  
+  // 使用 Worker 进行 Bot AI 计算
+  const startTime = performance.now();
+  
+  // 准备发送给 Worker 的数据
+  const workerData = {
+    bots: JSON.parse(JSON.stringify(game.bots)), // 深拷贝 bot 状态
+    playerPos: { x: game.pos.x, y: game.pos.y, z: game.pos.z },
+    playerCrouchT: game.crouchT,
+    playerAlive: game.playerAlive,
+    playerTeam: game.team,
+    colliders: game.colliders,
+    roundState: {
+      bombPlanted: game.round.bombPlanted,
+      activeSite: game.round.activeSite,
+      plantSite: game.round.plantSite,
+      sitePos: game.round.sitePos,
+      siteRadius: game.round.siteRadius,
+      state: game.round.state
+    },
+    mapBounds: game.mapBounds,
+    grid: game.grid,
+    sites: game.round.sites,
+    routeNodes: game.routeNodes,
+    dt: dt,
+    now: nowMs()
+  };
+  
+  // 发送数据到 Worker
+  botWorker.postMessage({
+    type: 'update',
+    data: workerData
+  });
+  
+  pendingBotUpdate = true;
+  workerPerformanceMonitor.mainThreadTime = performance.now() - startTime;
+}
+
+// 主线程版本的 updateBots（用于回退）
+function updateBotsMainThread(dt) {
 
   const tNow = nowMs();
   const playerEye = v3(game.pos.x, game.pos.y + 1.6 - game.crouchT * 0.55, game.pos.z);
