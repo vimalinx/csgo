@@ -38,6 +38,12 @@ const overlay = document.getElementById('overlay');
 const globalEventManager = new EventManager();
 let frameCount = 0;
 
+// ========== 对象池容量限制 ==========
+// 防止对象池无限增长导致内存占用过高
+// 当对象池满时，多余的对象会被垃圾回收器回收
+const MAX_SHELL_POOL_SIZE = 200;  // 弹壳池最大容量
+const MAX_TRACER_POOL_SIZE = 150; // 曳光弹池最大容量
+
 const screenLobby = document.getElementById('screenLobby');
 const screenAI = document.getElementById('screenAI');
 const screenPause = document.getElementById('screenPause');
@@ -1058,6 +1064,33 @@ class Grenade {
 }
 
 /**
+ * 初始化烟雾粒子数组
+ * @param {Object} system - 烟雾粒子系统实例
+ * @returns {Array} 粒子数组
+ */
+function initSmokeParticles(system) {
+  const particles = [];
+  for (let i = 0; i < system.particleCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * system.radius;
+    const x = system.pos.x + Math.cos(angle) * r;
+    const z = system.pos.z + Math.sin(angle) * r;
+    const y = system.pos.y + Math.random() * system.height;
+
+    particles.push({
+      x, y, z,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.1,
+      vz: (Math.random() - 0.5) * 0.3,
+      size: 0.3 + Math.random() * 0.4,
+      opacity: 0.3 + Math.random() * 0.4,
+      life: 1.0,
+    });
+  }
+  return particles;
+}
+
+/**
  * 烟雾粒子系统
  */
 class SmokeParticleSystem {
@@ -1071,28 +1104,30 @@ class SmokeParticleSystem {
     this.height = 2.5;
     this.particleCount = 200;
 
-    this.initParticles();
+    this.particles = initSmokeParticles(this);
   }
 
-  initParticles() {
-    for (let i = 0; i < this.particleCount; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * this.radius;
-      const x = this.pos.x + Math.cos(angle) * r;
-      const z = this.pos.z + Math.sin(angle) * r;
-      const y = this.pos.y + Math.random() * this.height;
-
-      this.particles.push({
-        x, y, z,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.1,
-        vz: (Math.random() - 0.5) * 0.3,
-        size: 0.3 + Math.random() * 0.4,
-        opacity: 0.3 + Math.random() * 0.4,
-        life: 1.0,
-      });
-    }
+/**
+ * 约束粒子在边界内
+ * @param {Object} particle - 粒子对象
+ * @param {Object} system - 烟雾系统实例
+ */
+function constrainParticle(particle, system) {
+  // 水平边界约束（圆形）
+  const dx = particle.x - system.pos.x;
+  const dz = particle.z - system.pos.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  if (dist > system.radius) {
+    particle.x = system.pos.x + (dx / dist) * system.radius;
+    particle.z = system.pos.z + (dz / dist) * system.radius;
+    particle.vx *= -0.5;
+    particle.vz *= -0.5;
   }
+
+  // 高度约束
+  if (particle.y < system.pos.y) particle.y = system.pos.y;
+  if (particle.y > system.pos.y + system.height) particle.y = system.pos.y + system.height;
+}
 
   update(dt) {
     this.timer += dt;
@@ -1115,19 +1150,7 @@ class SmokeParticleSystem {
       p.z += p.vz * dt;
 
       // 边界约束
-      const dx = p.x - this.pos.x;
-      const dz = p.z - this.pos.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > this.radius) {
-        p.x = this.pos.x + (dx / dist) * this.radius;
-        p.z = this.pos.z + (dz / dist) * this.radius;
-        p.vx *= -0.5;
-        p.vz *= -0.5;
-      }
-
-      // 高度约束
-      if (p.y < this.pos.y) p.y = this.pos.y;
-      if (p.y > this.pos.y + this.height) p.y = this.pos.y + this.height;
+      constrainParticle(p, this);
 
       // 随机扰动
       p.vx += (Math.random() - 0.5) * 0.1;
@@ -6570,9 +6593,13 @@ function obtainShell() {
 
 /**
  * 回收弹壳对象到对象池
+ * 容量限制：超过 MAX_SHELL_POOL_SIZE 时丢弃对象（让 GC 回收）
  */
 function recycleShell(shell) {
-  game.shellPool.push(shell);
+  if (game.shellPool.length < MAX_SHELL_POOL_SIZE) {
+    game.shellPool.push(shell);
+  }
+  // 超过容量则丢弃，让垃圾回收器回收
 }
 
 /**
@@ -6584,9 +6611,13 @@ function obtainTracer() {
 
 /**
  * 回收曳光弹对象到对象池
+ * 容量限制：超过 MAX_TRACER_POOL_SIZE 时丢弃对象（让 GC 回收）
  */
 function recycleTracer(tracer) {
-  game.tracerPool.push(tracer);
+  if (game.tracerPool.length < MAX_TRACER_POOL_SIZE) {
+    game.tracerPool.push(tracer);
+  }
+  // 超过容量则丢弃，让垃圾回收器回收
 }
 
 function drawWorld() {
