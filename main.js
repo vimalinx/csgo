@@ -2150,6 +2150,63 @@ class Game {
 // 旧的 Minimap 类已被 Radar 系统取代
 // 参见 radar.js
 
+// ========== 性能优化：脏标记系统和缓存 ==========
+// HUD脏标记：只在数据变化时更新DOM
+const hudDirtyFlags = {
+  health: true,
+  armor: true,
+  ammo: true,
+  money: true,
+  weapon: true,
+  objective: true,
+  crosshair: true,
+  aliveCount: true
+};
+
+// HUD上一次的值，用于比较变化
+const lastHudValues = {
+  hp: -1,
+  armor: -1,
+  money: -1,
+  ammoMag: -1,
+  ammoReserve: -1,
+  ctAlive: -1,
+  tAlive: -1
+};
+
+// 标记HUD需要更新
+function markHudDirty(flag) {
+  if (flag) hudDirtyFlags[flag] = true;
+  else Object.keys(hudDirtyFlags).forEach(k => hudDirtyFlags[k] = true);
+}
+
+// 向量计算缓存（LRU策略）
+const vectorCache = new Map();
+const VECTOR_CACHE_MAX_SIZE = 500;
+
+function cachedV3Norm(v) {
+  const key = `${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}`;
+  if (vectorCache.has(key)) {
+    return vectorCache.get(key);
+  }
+  const result = v3norm(v);
+  vectorCache.set(key, result);
+  
+  // LRU：超过限制时删除最旧的
+  if (vectorCache.size > VECTOR_CACHE_MAX_SIZE) {
+    const firstKey = vectorCache.keys().next().value;
+    vectorCache.delete(firstKey);
+  }
+  
+  return result;
+}
+
+// 更新函数节流控制
+let lastBotUpdateTime = 0;
+let lastTargetUpdateTime = 0;
+const BOT_UPDATE_INTERVAL = 16; // 16ms (约60fps)
+const TARGET_UPDATE_INTERVAL = 8; // 8ms (更高频率)
+
 const game = new Game();
 const radar = new Radar(hud, game);
 ensureRadarActive();
@@ -3636,7 +3693,7 @@ function setupMultiplayerListeners() {
   })
 
   // Tab键计分板监听
-  document.addEventListener('keydown', (e) => {
+  globalEventManager.add(document, 'keydown', (e) => {
     if (e.key === 'Tab' && game.mode === 'online') {
       e.preventDefault()
       const scoreboard = document.getElementById('scoreboard')
@@ -3644,16 +3701,16 @@ function setupMultiplayerListeners() {
         scoreboard.style.display = 'block'
       }
     }
-  })
+  }, {}, 'online')
 
-  document.addEventListener('keyup', (e) => {
+  globalEventManager.add(document, 'keyup', (e) => {
     if (e.key === 'Tab' && game.mode === 'online') {
       const scoreboard = document.getElementById('scoreboard')
       if (scoreboard) {
         scoreboard.style.display = 'none'
       }
     }
-  })
+  }, {}, 'online')
 
   // 聊天系统
   import('./multiplayer-ui.js').then(module => {
@@ -3666,7 +3723,7 @@ function setupMultiplayerListeners() {
   })
 
   // Y键全局聊天，U键队伍聊天
-  document.addEventListener('keydown', (e) => {
+  globalEventManager.add(document, 'keydown', (e) => {
     if (game.mode === 'online' && game.pointerLocked) {
       const chatInput = document.getElementById('chatInput')
 
@@ -3688,10 +3745,10 @@ function setupMultiplayerListeners() {
         })
       }
     }
-  })
+  }, {}, 'online')
 
   // 聊天输入监听
-  document.addEventListener('keydown', (e) => {
+  globalEventManager.add(document, 'keydown', (e) => {
     const chatInput = document.getElementById('chatInput')
     if (!chatInput || chatInput.style.display === 'none') return
 
@@ -4244,13 +4301,45 @@ function setStatus(text, urgent) {
 }
 
 function updateHud() {
-  hpText.textContent = String(Math.max(0, Math.floor(game.hp)));
-  arText.textContent = String(Math.max(0, Math.floor(game.armor)));
-  hpBar.style.width = `${clamp01(game.hp / 100) * 100}%`;
-  arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
+  // 性能优化：只在HP/护甲变化时更新DOM
+  const currentHp = Math.max(0, Math.floor(game.hp));
+  const currentArmor = Math.max(0, Math.floor(game.armor));
+  
+  if (hudDirtyFlags.health || lastHudValues.hp !== currentHp) {
+    hpText.textContent = String(currentHp);
+    hpBar.style.width = `${clamp01(game.hp / 100) * 100}%`;
+    lastHudValues.hp = currentHp;
+    hudDirtyFlags.health = false;
+  }
+  
+  if (hudDirtyFlags.armor || lastHudValues.armor !== currentArmor) {
+    arText.textContent = String(currentArmor);
+    arBar.style.width = `${clamp01(game.armor / 100) * 100}%`;
+    lastHudValues.armor = currentArmor;
+    hudDirtyFlags.armor = false;
+  }
+  
   const w = game.getWeapon();
-  if (moneyTextEl) moneyTextEl.textContent = `$${Math.floor(game.econ.money)}`;
-  ammoText.textContent = w ? `${w.mag} / ${w.reserve}` : '-- / --';
+  
+  // 金钱：降低更新频率
+  const currentMoney = Math.floor(game.econ.money);
+  if (hudDirtyFlags.money || lastHudValues.money !== currentMoney) {
+    if (moneyTextEl) moneyTextEl.textContent = `$${currentMoney}`;
+    lastHudValues.money = currentMoney;
+    hudDirtyFlags.money = false;
+  }
+  
+  // 弹药：只在变化时更新
+  if (w) {
+    if (hudDirtyFlags.ammo || lastHudValues.ammoMag !== w.mag || lastHudValues.ammoReserve !== w.reserve) {
+      ammoText.textContent = `${w.mag} / ${w.reserve}`;
+      lastHudValues.ammoMag = w.mag;
+      lastHudValues.ammoReserve = w.reserve;
+      hudDirtyFlags.ammo = false;
+    }
+  } else {
+    ammoText.textContent = '-- / --';
+  }
   if (fireModeHintEl) {
     const mode = game.fireModeAuto ? 'AUTO' : 'SEMI';
     const buyState = game.buyMenuOpen ? '关闭购买菜单' : '购买菜单';
@@ -4267,8 +4356,12 @@ function updateHud() {
     fireModeHintEl.textContent = `[B] ${buyState} · [1/2] 切枪 · [X] ${mode}${equipText}${scopeText}`;
   }
 
-  if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
-  if (tAliveEl) tAliveEl.textContent = String(teamAliveCount('t'));
+  // 存活人数：只在变化时更新
+  if (hudDirtyFlags.aliveCount) {
+    if (ctAliveEl) ctAliveEl.textContent = String(teamAliveCount('ct'));
+    if (tAliveEl) tAliveEl.textContent = String(teamAliveCount('t'));
+    hudDirtyFlags.aliveCount = false;
+  }
 
   const isReloading = !!w && w.reloading;
   reloadWrap.classList.toggle('show', isReloading);
@@ -4337,7 +4430,10 @@ function updateHud() {
     }
   }
 
-  renderBuyMenu();
+  // 性能优化：只在购买菜单打开时渲染
+  if (game.buyMenuOpen) {
+    renderBuyMenu();
+  }
 }
 
 function lockPointer() {
@@ -5520,6 +5616,13 @@ function updatePlayer(dt) {
 }
 
 function updateTargets(dt) {
+  // 性能优化：节流控制，降低更新频率
+  const now = performance.now();
+  if (now - lastTargetUpdateTime < TARGET_UPDATE_INTERVAL) {
+    return; // 跳过本帧更新
+  }
+  lastTargetUpdateTime = now;
+  
   const tNow = nowMs();
   for (const tgt of game.targets) {
     if (!tgt.alive) {
@@ -5741,6 +5844,13 @@ function getRandomPatrolPoint() {
 // ==================== AI 更新 ====================
 
 function updateBots(dt) {
+  // 性能优化：节流控制，降低更新频率
+  const now = performance.now();
+  if (now - lastBotUpdateTime < BOT_UPDATE_INTERVAL) {
+    return; // 跳过本帧更新
+  }
+  lastBotUpdateTime = now;
+  
   if (isRoundFrozen()) return;
 
   const tNow = nowMs();
