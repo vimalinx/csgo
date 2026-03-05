@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Math & Physics Modules Test</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #1a1a1a;
+      color: #00ff00;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 { color: #00ff00; border-bottom: 2px solid #00ff00; padding-bottom: 10px; }
+    h2 { color: #ffff00; margin-top: 30px; }
+    .test-group {
+      background: #2a2a2a;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 5px;
+      border-left: 3px solid #00ff00;
+    }
+    .pass { color: #00ff00; }
+    .fail { color: #ff0000; font-weight: bold; }
+    .test-result {
+      padding: 5px 0;
+      border-bottom: 1px solid #3a3a3a;
+    }
+    .summary {
+      margin-top: 30px;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      border: 2px solid #00ff00;
+    }
+    .summary.all-pass { border-color: #00ff00; }
+    .summary.has-fail { border-color: #ff0000; }
+  </style>
+</head>
+<body>
+  <h1>🧪 MathUtils & Physics 模块测试</h1>
+  <div id="test-output"></div>
+  <div id="summary" class="summary"></div>
+
+  <script src="math-utils.js"></script>
+  <script src="physics.js"></script>
+  <script>
+    const output = document.getElementById('test-output');
+    const summary = document.getElementById('summary');
+    let passCount = 0;
+    let failCount = 0;
+
+    function test(group, name, fn) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'test-group';
+      groupEl.innerHTML = `<h2>${group}</h2>`;
+      output.appendChild(groupEl);
+
+      const result = { passed: 0, failed: 0 };
+      
+      try {
+        fn((testName, condition, details = '') => {
+          const status = condition ? '✓ PASS' : '✗ FAIL';
+          const className = condition ? 'pass' : 'fail';
+          const detailStr = details ? ` <span style="color:#888">[${details}]</span>` : '';
+          groupEl.innerHTML += `<div class="test-result ${className}">${status}: ${testName}${detailStr}</div>`;
+          
+          if (condition) {
+            passCount++;
+            result.passed++;
+          } else {
+            failCount++;
+            result.failed++;
+          }
+        });
+      } catch (error) {
+        groupEl.innerHTML += `<div class="test-result fail">✗ ERROR: ${error.message}</div>`;
+        failCount++;
+        result.failed++;
+      }
+
+      return result;
+    }
+
+    function assertEqual(a, b, tolerance = 1e-10) {
+      if (typeof a === 'object' && typeof b === 'object') {
+        return Math.abs(a.x - b.x) < tolerance &&
+               Math.abs(a.y - b.y) < tolerance &&
+               Math.abs(a.z - b.z) < tolerance;
+      }
+      return Math.abs(a - b) < tolerance;
+    }
+
+    function vecToString(v) {
+      return `{x:${v.x.toFixed(4)}, y:${v.y.toFixed(4)}, z:${v.z.toFixed(4)}}`;
+    }
+
+    // ========== MathUtils Tests ==========
+    
+    test('MathUtils - 向量创建', (t) => {
+      const v = MathUtils.v3(1, 2, 3);
+      t('v3 创建向量', v.x === 1 && v.y === 2 && v.z === 3, `got ${vecToString(v)}`);
+    });
+
+    test('MathUtils - 向量加减', (t) => {
+      const a = {x: 1, y: 2, z: 3};
+      const b = {x: 4, y: 5, z: 6};
+      
+      const sum = MathUtils.v3add(a, b);
+      t('v3add 向量加法', assertEqual(sum, {x: 5, y: 7, z: 9}), `got ${vecToString(sum)}`);
+      
+      const diff = MathUtils.v3sub(b, a);
+      t('v3sub 向量减法', assertEqual(diff, {x: 3, y: 3, z: 3}), `got ${vecToString(diff)}`);
+    });
+
+    test('MathUtils - 向量标量乘法', (t) => {
+      const v = {x: 1, y: 2, z: 3};
+      
+      const scaled = MathUtils.v3mul(v, 2);
+      t('v3mul 向量乘法', assertEqual(scaled, {x: 2, y: 4, z: 6}), `got ${vecToString(scaled)}`);
+      
+      const scaled2 = MathUtils.v3scale(v, 0.5);
+      t('v3scale 别名', assertEqual(scaled2, {x: 0.5, y: 1, z: 1.5}), `got ${vecToString(scaled2)}`);
+    });
+
+    test('MathUtils - 向量点积叉积', (t) => {
+      const a = {x: 1, y: 0, z: 0};
+      const b = {x: 0, y: 1, z: 0};
+      
+      const dot = MathUtils.v3dot(a, b);
+      t('v3dot 正交向量点积为0', dot === 0, `got ${dot}`);
+      
+      const dot2 = MathUtils.v3dot(a, a);
+      t('v3dot 单位向量点积为1', dot2 === 1, `got ${dot2}`);
+      
+      const cross = MathUtils.v3cross(a, b);
+      t('v3cross X×Y=Z', assertEqual(cross, {x: 0, y: 0, z: 1}), `got ${vecToString(cross)}`);
+      
+      const cross2 = MathUtils.v3cross(b, a);
+      t('v3cross Y×X=-Z', assertEqual(cross2, {x: 0, y: 0, z: -1}), `got ${vecToString(cross2)}`);
+    });
+
+    test('MathUtils - 向量长度和归一化', (t) => {
+      const v = {x: 3, y: 4, z: 0};
+      
+      const len = MathUtils.v3len(v);
+      t('v3len 3-4-5三角形', len === 5, `got ${len}`);
+      
+      const norm = MathUtils.v3norm(v);
+      t('v3norm 归一化', assertEqual(norm, {x: 0.6, y: 0.8, z: 0}), `got ${vecToString(norm)}`);
+      
+      const zeroVec = {x: 0, y: 0, z: 0};
+      const zeroNorm = MathUtils.v3norm(zeroVec);
+      t('v3norm 零向量保护', assertEqual(zeroNorm, {x: 0, y: 0, z: 0}), `got ${vecToString(zeroNorm)}`);
+    });
+
+    test('MathUtils - 向量距离', (t) => {
+      const a = {x: 0, y: 0, z: 0};
+      const b = {x: 3, y: 4, z: 0};
+      
+      const dist = MathUtils.v3dist(a, b);
+      t('v3dist 距离计算', dist === 5, `got ${dist}`);
+      
+      const c = {x: 1, y: 1, z: 1};
+      const d = {x: 2, y: 2, z: 2};
+      const dist2 = MathUtils.v3dist(c, d);
+      t('v3dist 对角距离', Math.abs(dist2 - Math.sqrt(3)) < 1e-10, `got ${dist2}`);
+    });
+
+    test('MathUtils - 矩阵单位矩阵', (t) => {
+      const m = MathUtils.mat4Identity();
+      t('mat4Identity[0]=1', m[0] === 1);
+      t('mat4Identity[5]=1', m[5] === 1);
+      t('mat4Identity[10]=1', m[10] === 1);
+      t('mat4Identity[15]=1', m[15] === 1);
+      t('mat4Identity 其他位置=0', m[1] === 0 && m[2] === 0 && m[3] === 0);
+    });
+
+    test('MathUtils - 矩阵变换点', (t) => {
+      const m = MathUtils.mat4Identity();
+      const p = {x: 1, y: 2, z: 3};
+      
+      const result = MathUtils.mat4TransformPoint(m, p);
+      t('mat4TransformPoint 单位矩阵不变', assertEqual(result, p), `got ${vecToString(result)}`);
+    });
+
+    test('MathUtils - 辅助函数', (t) => {
+      t('clamp01 0.5→0.5', MathUtils.clamp01(0.5) === 0.5);
+      t('clamp01 1.5→1', MathUtils.clamp01(1.5) === 1);
+      t('clamp01 -0.5→0', MathUtils.clamp01(-0.5) === 0);
+      
+      t('clamp(5,0,10)=5', MathUtils.clamp(5, 0, 10) === 5);
+      t('clamp(-1,0,10)=0', MathUtils.clamp(-1, 0, 10) === 0);
+      t('clamp(15,0,10)=10', MathUtils.clamp(15, 0, 10) === 10);
+      
+      t('lerp(0,10,0.5)=5', MathUtils.lerp(0, 10, 0.5) === 5);
+      t('lerp(0,10,0)=0', MathUtils.lerp(0, 10, 0) === 0);
+      t('lerp(0,10,1)=10', MathUtils.lerp(0, 10, 1) === 10);
+      
+      t('easeOutQuad(0)=0', MathUtils.easeOutQuad(0) === 0);
+      t('easeOutQuad(1)=1', MathUtils.easeOutQuad(1) === 1);
+      t('easeOutQuad(0.5)=0.75', MathUtils.easeOutQuad(0.5) === 0.75);
+    });
+
+    // ========== Physics Tests ==========
+
+    test('Physics - AABB 创建', (t) => {
+      const center = {x: 0, y: 1, z: 0};
+      const half = {x: 0.5, y: 1, z: 0.5};
+      
+      const aabb = Physics.aabbFromCenter(center, half);
+      t('aabbFromCenter min', assertEqual(aabb.min, {x: -0.5, y: 0, z: -0.5}), `got ${vecToString(aabb.min)}`);
+      t('aabbFromCenter max', assertEqual(aabb.max, {x: 0.5, y: 2, z: 0.5}), `got ${vecToString(aabb.max)}`);
+    });
+
+    test('Physics - AABB 相交测试', (t) => {
+      const a = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 2, z: 2}};
+      const b = {min: {x: 1, y: 1, z: 1}, max: {x: 3, y: 3, z: 3}};
+      const c = {min: {x: 3, y: 3, z: 3}, max: {x: 4, y: 4, z: 4}};
+      
+      t('aabbIntersects 重叠', Physics.aabbIntersects(a, b) === true);
+      t('aabbIntersects 不重叠', Physics.aabbIntersects(a, c) === false);
+      t('aabbIntersects 自身', Physics.aabbIntersects(a, a) === true);
+    });
+
+    test('Physics - 点在 AABB 内测试', (t) => {
+      const aabb = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 2, z: 2}};
+      
+      t('pointInAABB 中心点', Physics.pointInAABB({x: 1, y: 1, z: 1}, aabb) === true);
+      t('pointInAABB 边界点', Physics.pointInAABB({x: 0, y: 0, z: 0}, aabb) === true);
+      t('pointInAABB 外部点', Physics.pointInAABB({x: 3, y: 1, z: 1}, aabb) === false);
+    });
+
+    test('Physics - AABB 最近点', (t) => {
+      const aabb = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 2, z: 2}};
+      
+      const p1 = Physics.closestPointOnAABB({x: 3, y: 1, z: 1}, aabb);
+      t('closestPointOnAABB 外部→边界', assertEqual(p1, {x: 2, y: 1, z: 1}), `got ${vecToString(p1)}`);
+      
+      const p2 = Physics.closestPointOnAABB({x: 1, y: 1, z: 1}, aabb);
+      t('closestPointOnAABB 内部→自身', assertEqual(p2, {x: 1, y: 1, z: 1}), `got ${vecToString(p2)}`);
+    });
+
+    test('Physics - 射线 AABB 求交', (t) => {
+      const aabb = {min: {x: 2, y: -1, z: -1}, max: {x: 4, y: 1, z: 1}};
+      
+      // 沿 X 轴的射线
+      const t1 = Physics.rayAABBIntersect({x: 0, y: 0, z: 0}, {x: 1, y: 0, z: 0}, aabb);
+      t('rayAABBIntersect X轴射线', t1 === 2, `got t=${t1}`);
+      
+      // 反向射线（不相交）
+      const t2 = Physics.rayAABBIntersect({x: 0, y: 0, z: 0}, {x: -1, y: 0, z: 0}, aabb);
+      t('rayAABBIntersect 反向不相交', t2 === null, `got t=${t2}`);
+      
+      // 从内部出发的射线
+      const t3 = Physics.rayAABBIntersect({x: 3, y: 0, z: 0}, {x: 1, y: 0, z: 0}, aabb);
+      t('rayAABBIntersect 从内部出发', t3 >= 0, `got t=${t3}`);
+      
+      // rayAabb 别名
+      const t4 = Physics.rayAabb({x: 0, y: 0, z: 0}, {x: 1, y: 0, z: 0}, aabb);
+      t('rayAabb 别名', t4 === t1, `got t=${t4}`);
+    });
+
+    test('Physics - AABB 辅助函数', (t) => {
+      const aabb = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 4, z: 6}};
+      
+      const center = Physics.aabbCenter(aabb);
+      t('aabbCenter', assertEqual(center, {x: 1, y: 2, z: 3}), `got ${vecToString(center)}`);
+      
+      const size = Physics.aabbSize(aabb);
+      t('aabbSize', assertEqual(size, {x: 2, y: 4, z: 6}), `got ${vecToString(size)}`);
+      
+      const half = Physics.aabbHalf(aabb);
+      t('aabbHalf', assertEqual(half, {x: 1, y: 2, z: 3}), `got ${vecToString(half)}`);
+    });
+
+    test('Physics - 点到 AABB 距离', (t) => {
+      const aabb = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 2, z: 2}};
+      
+      const d1 = Physics.distanceToAABB({x: 1, y: 1, z: 1}, aabb);
+      t('distanceToAABB 内部点=0', d1 === 0, `got ${d1}`);
+      
+      const d2 = Physics.distanceToAABB({x: 5, y: 1, z: 1}, aabb);
+      t('distanceToAABB 外部点', d2 === 3, `got ${d2}`);
+    });
+
+    test('Physics - AABB 合并', (t) => {
+      const a = {min: {x: 0, y: 0, z: 0}, max: {x: 2, y: 2, z: 2}};
+      const b = {min: {x: 1, y: 1, z: 1}, max: {x: 3, y: 3, z: 3}};
+      
+      const merged = Physics.aabbMerge(a, b);
+      t('aabbMerge min', assertEqual(merged.min, {x: 0, y: 0, z: 0}), `got ${vecToString(merged.min)}`);
+      t('aabbMerge max', assertEqual(merged.max, {x: 3, y: 3, z: 3}), `got ${vecToString(merged.max)}`);
+    });
+
+    // Summary
+    const totalTests = passCount + failCount;
+    const passRate = totalTests > 0 ? ((passCount / totalTests) * 100).toFixed(1) : 0;
+    
+    summary.innerHTML = `
+      <h2>📊 测试总结</h2>
+      <div><strong>总测试数:</strong> ${totalTests}</div>
+      <div class="pass"><strong>通过:</strong> ${passCount}</div>
+      <div class="fail"><strong>失败:</strong> ${failCount}</div>
+      <div><strong>通过率:</strong> ${passRate}%</div>
+    `;
+    
+    if (failCount === 0) {
+      summary.className = 'summary all-pass';
+      summary.innerHTML += '<div style="margin-top:15px;font-size:18px">✅ 所有测试通过！</div>';
+    } else {
+      summary.className = 'summary has-fail';
+      summary.innerHTML += '<div style="margin-top:15px;font-size:18px;color:#ff0000">❌ 有测试失败，请检查！</div>';
+    }
+
+    console.log(`\n=== Test Summary ===`);
+    console.log(`Total: ${totalTests}, Passed: ${passCount}, Failed: ${failCount}`);
+    console.log(`Pass Rate: ${passRate}%`);
+  </script>
+</body>
+</html>
