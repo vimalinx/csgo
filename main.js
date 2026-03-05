@@ -2247,6 +2247,67 @@ function markHudDirty(flag) {
   else Object.keys(hudDirtyFlags).forEach(k => hudDirtyFlags[k] = true);
 }
 
+// ========== 性能监控系统 ==========
+const gamePerformance = {
+  // FPS 计算
+  fps: 0,
+  frameTime: 0,
+  lastTime: performance.now(),
+  frameCount: 0,
+  fpsUpdateInterval: 500, // 500ms 更新一次
+  lastFpsUpdate: performance.now(),
+
+  // 帧时间统计
+  minFrameTime: Infinity,
+  maxFrameTime: 0,
+  avgFrameTime: 0,
+  frameTimeHistory: [],
+
+  // 游戏循环各阶段耗时
+  stages: {
+    input: 0,
+    physics: 0,
+    ai: 0,
+    render: 0,
+    network: 0
+  },
+
+  // 更新方法
+  beginFrame() {
+    this.frameStart = performance.now();
+  },
+
+  endFrame() {
+    const now = performance.now();
+    this.frameTime = now - this.frameStart;
+    this.frameCount++;
+
+    // 更新 FPS
+    if (now - this.lastFpsUpdate >= this.fpsUpdateInterval) {
+      this.fps = Math.round(this.frameCount * 1000 / (now - this.lastFpsUpdate));
+      this.frameCount = 0;
+      this.lastFpsUpdate = now;
+    }
+
+    // 统计帧时间
+    this.frameTimeHistory.push(this.frameTime);
+    if (this.frameTimeHistory.length > 60) {
+      this.frameTimeHistory.shift();
+    }
+    this.minFrameTime = Math.min(...this.frameTimeHistory);
+    this.maxFrameTime = Math.max(...this.frameTimeHistory);
+    this.avgFrameTime = this.frameTimeHistory.reduce((a, b) => a + b, 0) / this.frameTimeHistory.length;
+  },
+
+  stageStart(stage) {
+    this.stages[stage] = performance.now();
+  },
+
+  stageEnd(stage) {
+    this.stages[stage] = performance.now() - this.stages[stage];
+  }
+};
+
 // 向量计算缓存（LRU策略）
 const vectorCache = new Map();
 const VECTOR_CACHE_MAX_SIZE = 500;
@@ -2327,7 +2388,7 @@ function applyBotUpdateResults(result) {
   const workerPerfEl = document.getElementById('workerPerf');
   if (workerPerfEl) {
     workerPerfEl.style.display = 'block';
-    workerPerfEl.textContent = `Worker: ${workerPerformanceMonitor.workerTime.toFixed(2)}ms | 主线程: ${workerPerformanceMonitor.mainThreadTime.toFixed(2)}ms`;
+    workerPerfEl.textContent = `FPS: ${gamePerformance.fps} | Frame: ${gamePerformance.avgFrameTime.toFixed(1)}ms (${gamePerformance.minFrameTime.toFixed(1)}/${gamePerformance.maxFrameTime.toFixed(1)}) | Worker: ${workerPerformanceMonitor.workerTime.toFixed(2)}ms | 主线程: ${workerPerformanceMonitor.mainThreadTime.toFixed(2)}ms`;
   }
   
   // 更新 bot 状态
@@ -7457,6 +7518,8 @@ function renderGrenadeEffects() {
 
 let last = nowMs();
 function frame() {
+  gamePerformance.beginFrame(); // 性能监控：帧开始
+
   const t = nowMs();
   let dt = (t - last) / 1000;
   frameCount++;
@@ -7521,6 +7584,7 @@ function frame() {
     updateMultiplayerScoreboard()
   }
 
+  gamePerformance.endFrame(); // 性能监控：帧结束
   requestAnimationFrame(frame);
 }
 
