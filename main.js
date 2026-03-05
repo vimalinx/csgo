@@ -1814,6 +1814,7 @@ class Game {
     this.weaponSlots = { primary: '', secondary: '', melee: '' };
     this.boxes = [];
     this.colliders = [];
+    this.collisionQuadtree = new AabbQuadtree(COLLISION_QUADTREE_BOUNDS, 6, 8);
     this.grid = Array.from({ length: NAV_GRID_SIZE }, () => Array(NAV_GRID_SIZE).fill(0));
     this.targets = [];
     this.bots = [];
@@ -5049,7 +5050,8 @@ function updateWeapon(dt) {
   collisionPerf.rayCasts++;
   const maxTargetDist = Math.min(90, Number.isFinite(bestT) ? bestT : 90);
   const queryAabb = raySweepAabb2(roAim, rdAim, maxTargetDist, 1.4);
-  const targetTree = new AabbQuadtree(COLLISION_QUADTREE_BOUNDS, 6, 8);
+  const targetTree = game.collisionQuadtree;
+  targetTree.clear();
 
   for (let i = 0; i < game.bots.length; i++) {
     const bot = game.bots[i];
