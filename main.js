@@ -886,6 +886,48 @@ function makeTarget(id, pos) {
   };
 }
 
+/**
+ * 创建 Bot 默认武器配置
+ * @returns {Object} 武器配置对象
+ */
+function createDefaultWeapon() {
+  return {
+    rpm: 240,
+    damage: 5,
+    magSize: 18,
+    mag: 18,
+    reserve: 999,
+    reloadSec: 1.3,
+    reloading: false,
+    reloadLeft: 0,
+    reloadTotal: 1.3,
+    spreadDeg: 2.2,
+  };
+}
+
+/**
+ * 创建 Bot 导航状态
+ * @param {Object} pos - 初始位置 {x, y, z}
+ * @returns {Object} 导航状态对象
+ */
+function createBotNavigationState(pos) {
+  return {
+    navPath: [],
+    navIndex: 0,
+    navGoalKey: '',
+    navRepathAt: 0,
+    forceRepath: false,
+    stuckTime: 0,
+    lastNavPos: v3(pos.x, pos.y, pos.z),
+  };
+}
+
+/**
+ * 创建 Bot 实例
+ * @param {number} id - Bot ID
+ * @param {Object} pos - 初始位置 {x, y, z}
+ * @returns {Object} Bot 对象
+ */
 function makeBot(id, pos) {
   return {
     id,
@@ -903,29 +945,12 @@ function makeBot(id, pos) {
     respawnAt: 0,
     nextThinkAt: 0,
     shootCooldown: 0,
-    weapon: {
-      rpm: 240,
-      damage: 5,
-      magSize: 18,
-      mag: 18,
-      reserve: 999,
-      reloadSec: 1.3,
-      reloading: false,
-      reloadLeft: 0,
-      reloadTotal: 1.3,
-      spreadDeg: 2.2,
-    },
+    weapon: createDefaultWeapon(),
     state: 'patrol',
     patrolPhase: Math.random() * Math.PI * 2,
     patrolNode: 0,
     objectiveSite: id % 2 === 0 ? 'A' : 'B',
-    navPath: [],
-    navIndex: 0,
-    navGoalKey: '',
-    navRepathAt: 0,
-    forceRepath: false,
-    stuckTime: 0,
-    lastNavPos: v3(pos.x, pos.y, pos.z),
+    ...createBotNavigationState(pos),
     coverPos: null,
     coverEvalAt: 0,
     coverEnemyKey: '',
@@ -935,6 +960,60 @@ function makeBot(id, pos) {
 const DEFAULT_SPEED = 6.0;
 
 // ==================== 投掷物系统 ====================
+
+/**
+ * 处理投掷物反弹逻辑
+ * @param {Grenade} grenade - 投掷物实例
+ * @param {Object} newPos - 新位置 {x, y, z}
+ * @param {Array} colliders - 碰撞体数组
+ * @returns {boolean} 是否继续更新（false 表示达到最大反弹次数）
+ */
+function handleGrenadeBounce(grenade, newPos, colliders) {
+  const half = v3(0.1, 0.1, 0.1);
+  const aabb = aabbFromCenter(newPos, half);
+
+  // 与碰撞体反弹
+  for (const c of colliders) {
+    if (aabbIntersects(aabb, c)) {
+      grenade.bounces++;
+
+      if (grenade.bounces >= grenade.maxBounces) {
+        grenade.alive = false;
+        return false;
+      }
+
+      // 反弹速度分量并减速
+      if (Math.abs(grenade.vel.y) > 0.1) {
+        grenade.vel.y = -grenade.vel.y * 0.4;
+        newPos.y = grenade.pos.y;
+      }
+      if (Math.abs(grenade.vel.x) > 0.1) {
+        grenade.vel.x = -grenade.vel.x * 0.4;
+      }
+      if (Math.abs(grenade.vel.z) > 0.1) {
+        grenade.vel.z = -grenade.vel.z * 0.4;
+      }
+
+      break;
+    }
+  }
+
+  // 地面检测
+  if (newPos.y <= 0.1) {
+    newPos.y = 0.1;
+    grenade.vel.y = -grenade.vel.y * 0.3;
+    grenade.vel.x *= 0.7;
+    grenade.vel.z *= 0.7;
+    grenade.bounces++;
+
+    if (grenade.bounces >= grenade.maxBounces || v3len(grenade.vel) < 0.5) {
+      grenade.alive = false;
+      return false;
+    }
+  }
+
+  return true;
+}
 
 /**
  * 投掷物基类（抛物线轨迹）
@@ -963,47 +1042,9 @@ class Grenade {
     // 计算新位置
     const newPos = v3add(this.pos, v3scale(this.vel, dt));
 
-    // 碰撞检测
-    const half = v3(0.1, 0.1, 0.1);
-    const aabb = aabbFromCenter(newPos, half);
-
-    for (const c of colliders) {
-      if (aabbIntersects(aabb, c)) {
-        // 反弹
-        this.bounces++;
-
-        if (this.bounces >= this.maxBounces) {
-          this.alive = false;
-          return;
-        }
-
-        // 简单反弹（反转速度分量并减速）
-        if (Math.abs(this.vel.y) > 0.1) {
-          this.vel.y = -this.vel.y * 0.4;
-          newPos.y = this.pos.y;
-        }
-        if (Math.abs(this.vel.x) > 0.1) {
-          this.vel.x = -this.vel.x * 0.4;
-        }
-        if (Math.abs(this.vel.z) > 0.1) {
-          this.vel.z = -this.vel.z * 0.4;
-        }
-
-        break;
-      }
-    }
-
-    // 地面检测
-    if (newPos.y <= 0.1) {
-      newPos.y = 0.1;
-      this.vel.y = -this.vel.y * 0.3;
-      this.vel.x *= 0.7;
-      this.vel.z *= 0.7;
-      this.bounces++;
-
-      if (this.bounces >= this.maxBounces || v3len(this.vel) < 0.5) {
-        this.alive = false;
-      }
+    // 处理反弹
+    if (!handleGrenadeBounce(this, newPos, colliders)) {
+      return; // 达到最大反弹次数，停止更新
     }
 
     this.pos = newPos;
@@ -7298,6 +7339,8 @@ function mat4TransformPoint(m, p) {
   const y = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13]
   const z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14]
   const w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15]
+  // 透视除法保护：w 接近 0 时返回会导致裁剪的点
+  if (Math.abs(w) < 1e-8) return v3(0, 0, 0)
   return v3(x / w, y / w, z / w)
 }
 
