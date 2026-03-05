@@ -117,69 +117,30 @@ const buyNoticeEl = document.getElementById('buyNotice');
 
 canvas.tabIndex = 0;
 
-function v3(x, y, z) {
-  return { x, y, z };
-}
+// ============================================================================
+// 引入模块函数 - 从 math-utils.js 和 physics.js 模块中引入函数
+// ============================================================================
+const MathUtils = window.MathUtils;
+const Physics = window.Physics;
 
-function v3add(a, b) {
-  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-}
+// 向量运算函数
+const { v3, v3add, v3sub, v3scale, v3dot, v3cross, v3len, v3norm } = MathUtils;
+// 辅助数学函数
+const { clamp01, clamp, lerp, easeOutQuad } = MathUtils;
+// 矩阵运算函数
+const { mat4Identity, mat4Mul } = MathUtils;
+// 物理碰撞函数
+const { aabbFromCenter, aabbIntersects, rayAabb } = Physics;
 
-function v3sub(a, b) {
-  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-}
+// 以上函数已从模块导入，本地定义已删除
+// - v3, v3add, v3sub, v3scale, v3dot, v3cross, v3len, v3norm → math-utils.js
+// - clamp01, clamp, lerp, easeOutQuad → math-utils.js
+// - mat4Identity, mat4Mul → math-utils.js
+// - aabbFromCenter, aabbIntersects, rayAabb → physics.js
 
-function v3scale(a, s) {
-  return { x: a.x * s, y: a.y * s, z: a.z * s };
-}
-
-function v3dot(a, b) {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-function v3cross(a, b) {
-  return {
-    x: a.y * b.z - a.z * b.y,
-    y: a.z * b.x - a.x * b.z,
-    z: a.x * b.y - a.y * b.x,
-  };
-}
-
-function v3len(a) {
-  return Math.hypot(a.x, a.y, a.z);
-}
-
-function v3norm(a) {
-  const L = v3len(a);
-  if (L <= 1e-8) return { x: 0, y: 0, z: 0 };
-  return { x: a.x / L, y: a.y / L, z: a.z / L };
-}
-
-function clamp01(v) {
-  return Math.max(0, Math.min(1, v));
-}
-
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function easeOutQuad(t) {
-  const x = clamp01(t)
-  return x * (2 - x)
-}
-
-function mat4Identity() {
-  const m = new Float32Array(16);
-  m[0] = 1;
-  m[5] = 1;
-  m[10] = 1;
-  m[15] = 1;
-  return m;
-}
+// ============================================================================
+// 保留的矩阵函数（模块中未提供）
+// ============================================================================
 
 function mat4Perspective(out, fovy, aspect, near, far) {
   const f = 1 / Math.tan(fovy / 2);
@@ -226,59 +187,7 @@ function mat4LookAt(out, eye, center, up) {
   return out;
 }
 
-function mat4Mul(out, a, b) {
-  const a00 = a[0],
-    a01 = a[1],
-    a02 = a[2],
-    a03 = a[3];
-  const a10 = a[4],
-    a11 = a[5],
-    a12 = a[6],
-    a13 = a[7];
-  const a20 = a[8],
-    a21 = a[9],
-    a22 = a[10],
-    a23 = a[11];
-  const a30 = a[12],
-    a31 = a[13],
-    a32 = a[14],
-    a33 = a[15];
-
-  const b00 = b[0],
-    b01 = b[1],
-    b02 = b[2],
-    b03 = b[3];
-  const b10 = b[4],
-    b11 = b[5],
-    b12 = b[6],
-    b13 = b[7];
-  const b20 = b[8],
-    b21 = b[9],
-    b22 = b[10],
-    b23 = b[11];
-  const b30 = b[12],
-    b31 = b[13],
-    b32 = b[14],
-    b33 = b[15];
-
-  out[0] = a00 * b00 + a10 * b01 + a20 * b02 + a30 * b03;
-  out[1] = a01 * b00 + a11 * b01 + a21 * b02 + a31 * b03;
-  out[2] = a02 * b00 + a12 * b01 + a22 * b02 + a32 * b03;
-  out[3] = a03 * b00 + a13 * b01 + a23 * b02 + a33 * b03;
-  out[4] = a00 * b10 + a10 * b11 + a20 * b12 + a30 * b13;
-  out[5] = a01 * b10 + a11 * b11 + a21 * b12 + a31 * b13;
-  out[6] = a02 * b10 + a12 * b11 + a22 * b12 + a32 * b13;
-  out[7] = a03 * b10 + a13 * b11 + a23 * b12 + a33 * b13;
-  out[8] = a00 * b20 + a10 * b21 + a20 * b22 + a30 * b23;
-  out[9] = a01 * b20 + a11 * b21 + a21 * b22 + a31 * b23;
-  out[10] = a02 * b20 + a12 * b21 + a22 * b22 + a32 * b23;
-  out[11] = a03 * b20 + a13 * b21 + a23 * b22 + a33 * b23;
-  out[12] = a00 * b30 + a10 * b31 + a20 * b32 + a30 * b33;
-  out[13] = a01 * b30 + a11 * b31 + a21 * b32 + a31 * b33;
-  out[14] = a02 * b30 + a12 * b31 + a22 * b32 + a32 * b33;
-  out[15] = a03 * b30 + a13 * b31 + a23 * b32 + a33 * b33;
-  return out;
-}
+// mat4Mul 已移至 math-utils.js 模块
 
 function mat4FromTranslation(out, t) {
   out.set(mat4Identity());
@@ -325,12 +234,7 @@ function rightFromYaw(yaw) {
   return v3(Math.cos(yaw), 0, -Math.sin(yaw));
 }
 
-function aabbFromCenter(p, half) {
-  return {
-    min: v3(p.x - half.x, p.y - half.y, p.z - half.z),
-    max: v3(p.x + half.x, p.y + half.y, p.z + half.z),
-  };
-}
+// aabbFromCenter 已移至 physics.js 模块
 
 // ============================================================================
 // AABB Quadtree Broad-Phase (XZ plane)
@@ -6681,6 +6585,84 @@ function recycleTracer(tracer) {
   // 超过容量则丢弃，让垃圾回收器回收
 }
 
+// ========== 基础绘图原语 ==========
+
+/**
+ * 绘制轴对齐的盒子
+ * @param {{x: number, y: number, z: number}} pos - 盒子位置
+ * @param {{x: number, y: number, z: number}} scale - 盒子缩放
+ * @param {{x: number, y: number, z: number}} color - RGB颜色
+ * @param {number} opacity - 不透明度 (0-1)
+ */
+function drawBox(pos, scale, color, opacity = 1) {
+  mat4FromTranslation(tmpA, pos);
+  mat4FromScale(tmpB, scale);
+  mat4Mul(model, tmpA, tmpB);
+  gl.uniformMatrix4fv(uModel, false, model);
+  gl.uniform3f(uColor, color.x, color.y, color.z);
+  if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
+  gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
+}
+
+/**
+ * 绘制有方向的盒子
+ * @param {{x: number, y: number, z: number}} pos - 盒子位置
+ * @param {{x: number, y: number, z: number}} right - 右方向向量
+ * @param {{x: number, y: number, z: number}} up - 上方向向量
+ * @param {{x: number, y: number, z: number}} forward - 前方向向量
+ * @param {{x: number, y: number, z: number}} scale - 盒子缩放
+ * @param {{x: number, y: number, z: number}} color - RGB颜色
+ * @param {number} opacity - 不透明度 (0-1)
+ */
+function drawOrientedBox(pos, right, up, forward, scale, color, opacity = 1) {
+  mat4FromBasisTRS(model, right, up, forward, pos, scale);
+  gl.uniformMatrix4fv(uModel, false, model);
+  gl.uniform3f(uColor, color.x, color.y, color.z);
+  if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
+  gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
+}
+
+/**
+ * 绘制有方向的圆柱体
+ * @param {{x: number, y: number, z: number}} pos - 圆柱体位置
+ * @param {{x: number, y: number, z: number}} right - 右方向向量
+ * @param {{x: number, y: number, z: number}} up - 上方向向量
+ * @param {{x: number, y: number, z: number}} forward - 前方向向量
+ * @param {{x: number, y: number, z: number}} scale - 圆柱体缩放
+ * @param {{x: number, y: number, z: number}} color - RGB颜色
+ * @param {number} opacity - 不透明度 (0-1)
+ */
+function drawOrientedCylinder(pos, right, up, forward, scale, color, opacity = 1) {
+  if (!glsys.cylVao || !glsys.cylIndexCount) return;
+  mat4FromBasisTRS(model, right, up, forward, pos, scale);
+  gl.uniformMatrix4fv(uModel, false, model);
+  gl.uniform3f(uColor, color.x, color.y, color.z);
+  if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
+  gl.bindVertexArray(glsys.cylVao);
+  gl.drawElements(gl.TRIANGLES, glsys.cylIndexCount, gl.UNSIGNED_SHORT, 0);
+  gl.bindVertexArray(glsys.vao);
+}
+
+/**
+ * 绘制弹道追踪线
+ * @param {{x: number, y: number, z: number}} a - 起点位置
+ * @param {{x: number, y: number, z: number}} b - 终点位置
+ * @param {{x: number, y: number, z: number}} color - RGB颜色
+ */
+function drawTracer(a, b, color) {
+  const mid = v3scale(v3add(a, b), 0.5);
+  const d = v3sub(b, a);
+  const len = v3len(d);
+  if (len < 0.001) return;
+  const f = v3scale(d, 1 / len);
+  const up = v3(0, 1, 0);
+  let r = v3cross(up, f);
+  if (v3len(r) < 0.001) r = v3(1, 0, 0);
+  r = v3norm(r);
+  const u = v3norm(v3cross(f, r));
+  drawOrientedBox(mid, r, u, f, v3(0.009, 0.009, len), color);
+}
+
 function drawWorld() {
   glsys.resize();
   const aspect = glsys.width / Math.max(1, glsys.height);
@@ -6743,49 +6725,6 @@ function drawWorld() {
   gl.uniform1i(uShadowMap, 0); // 纹理单元 0
 
   gl.bindVertexArray(glsys.vao);
-
-  function drawBox(pos, scale, color, opacity = 1) {
-    mat4FromTranslation(tmpA, pos);
-    mat4FromScale(tmpB, scale);
-    mat4Mul(model, tmpA, tmpB);
-    gl.uniformMatrix4fv(uModel, false, model);
-    gl.uniform3f(uColor, color.x, color.y, color.z);
-    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
-    gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
-  }
-
-  function drawOrientedBox(pos, right, up, forward, scale, color, opacity = 1) {
-    mat4FromBasisTRS(model, right, up, forward, pos, scale);
-    gl.uniformMatrix4fv(uModel, false, model);
-    gl.uniform3f(uColor, color.x, color.y, color.z);
-    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
-    gl.drawElements(gl.TRIANGLES, glsys.indexCount, gl.UNSIGNED_SHORT, 0);
-  }
-
-  function drawOrientedCylinder(pos, right, up, forward, scale, color, opacity = 1) {
-    if (!glsys.cylVao || !glsys.cylIndexCount) return;
-    mat4FromBasisTRS(model, right, up, forward, pos, scale);
-    gl.uniformMatrix4fv(uModel, false, model);
-    gl.uniform3f(uColor, color.x, color.y, color.z);
-    if (uOpacity) gl.uniform1f(uOpacity, clamp01(opacity));
-    gl.bindVertexArray(glsys.cylVao);
-    gl.drawElements(gl.TRIANGLES, glsys.cylIndexCount, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(glsys.vao);
-  }
-
-  function drawTracer(a, b, color) {
-    const mid = v3scale(v3add(a, b), 0.5);
-    const d = v3sub(b, a);
-    const len = v3len(d);
-    if (len < 0.001) return;
-    const f = v3scale(d, 1 / len);
-    const up = v3(0, 1, 0);
-    let r = v3cross(up, f);
-    if (v3len(r) < 0.001) r = v3(1, 0, 0);
-    r = v3norm(r);
-    const u = v3norm(v3cross(f, r));
-    drawOrientedBox(mid, r, u, f, v3(0.009, 0.009, len), color);
-  }
 
   // 地图盒体（使用视锥裁剪）
   for (const b of game.boxes) {
