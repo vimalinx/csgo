@@ -3318,7 +3318,18 @@ function returnToLobby() {
   clearAllRemoteDeathAnimations()
   floatingDamageNumbers = []
   clearHealthBars()
-  
+
+  // 清理事件监听器 - 防止内存泄漏
+  globalEventManager.clear();
+
+  // 清理观战模式
+  if (spectatorManager && spectatorManager.isEnabled()) {
+    spectatorManager.stop();
+  }
+  if (spectatorUI && spectatorUI.isVisible) {
+    spectatorUI.destroy();
+  }
+
   // Clean up multiplayer if active
   if (multiplayer.isConnected) {
     multiplayer.disconnect()
@@ -4325,9 +4336,16 @@ function unlockPointer() {
   document.exitPointerLock();
 }
 
-canvas.addEventListener('click', () => {
-  if (!game.pointerLocked && game.mode === 'ai') lockPointer();
-});
+// 使用事件管理器注册 canvas click - 防止内存泄漏
+globalEventManager.add(
+  canvas,
+  'click',
+  () => {
+    if (!game.pointerLocked && game.mode === 'ai') lockPointer();
+  },
+  {},
+  'canvas' // 命名空间：canvas
+);
 
 // 使用事件管理器注册 document pointerlockchange - 防止内存泄漏
 globalEventManager.add(
@@ -4368,7 +4386,11 @@ globalEventManager.add(
   'document' // 命名空间：document
 );
 
-document.addEventListener('keydown', (e) => {
+// 使用事件管理器注册 document keydown - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'keydown',
+  (e) => {
   if (e.code === 'F5') {
     e.preventDefault();
     const shown = radar.toggleSize();
@@ -4706,6 +4728,10 @@ btnRestart.addEventListener('click', () => {
     startAIMode();
   }
 });
+  },
+  {},
+  'document' // 命名空间：document
+);
 
 btnReturnLobby.addEventListener('click', () => {
   returnToLobby();
@@ -4791,7 +4817,11 @@ setBotCount(5);
 setMatchMode('bomb');
 applyVolumesFromUI();
 
-document.addEventListener('mousemove', (e) => {
+// 使用事件管理器注册 document mousemove - 防止内存泄漏
+globalEventManager.add(
+  document,
+  'mousemove',
+  (e) => {
   // 观战模式下，自由视角需要鼠标控制
   if (spectatorManager.isEnabled() && spectatorManager.getMode() === SPECTATOR_MODE.FREE_CAMERA) {
     // 自由视角模式下，直接更新game.yaw和game.pitch用于观战
@@ -4813,7 +4843,10 @@ document.addEventListener('mousemove', (e) => {
   game.mouseDY = game.mouseDY * 0.6 + e.movementY * 0.4;
   const maxPitch = Math.PI / 2 - 0.02;
   game.pitch = clamp(game.pitch, -maxPitch, maxPitch);
-});
+  },
+  {},
+  'document' // 命名空间：document
+);
 
 function tryReload() {
   const w = game.getWeapon();

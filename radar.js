@@ -66,12 +66,30 @@ export default class Radar {
   }
 
   bindEvents() {
-    document.addEventListener('keydown', (e) => {
+    // 保存事件处理函数引用，用于后续移除
+    this.boundKeyHandler = (e) => {
       if (e.key === 'Tab' && !e.repeat) {
         e.preventDefault()
         this.toggleSize()
       }
-    })
+    }
+    document.addEventListener('keydown', this.boundKeyHandler)
+  }
+
+  unbindEvents() {
+    if (this.boundKeyHandler) {
+      document.removeEventListener('keydown', this.boundKeyHandler)
+      this.boundKeyHandler = null
+    }
+  }
+
+  destroy() {
+    this.unbindEvents()
+    if (this.canvas && this.canvas.parentElement) {
+      this.canvas.parentElement.removeChild(this.canvas)
+    }
+    this.canvas = null
+    this.ctx = null
   }
 
   worldToMap(x, z, bounds) {
