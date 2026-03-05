@@ -3389,8 +3389,8 @@ function returnToLobby() {
   floatingDamageNumbers = []
   clearHealthBars()
 
-  // 清理事件监听器 - 防止内存泄漏
-  globalEventManager.clear();
+  // 仅清理在线模式的事件监听，保留全局基础输入监听
+  globalEventManager.clear('online');
 
   // 清理观战模式
   if (spectatorManager && spectatorManager.isEnabled()) {
@@ -3732,7 +3732,7 @@ function setupMultiplayerListeners() {
         e.preventDefault()
         import('./multiplayer-ui.js').then(module => {
           module.toggleChatInput(true, 'global')
-          exitPointerLock()
+          unlockPointer()
         })
       }
 
@@ -3741,7 +3741,7 @@ function setupMultiplayerListeners() {
         e.preventDefault()
         import('./multiplayer-ui.js').then(module => {
           module.toggleChatInput(true, 'team')
-          exitPointerLock()
+          unlockPointer()
         })
       }
     }
@@ -3822,7 +3822,7 @@ function updateMultiplayerScoreboard() {
     kills: game.stats.kills || 0,
     deaths: game.stats.deaths || 0,
     assists: game.stats.assists || 0,
-    money: game.money || 800,
+    money: game.econ.money || 800,
     ping: 0 // 本地玩家延迟为0
   }
 
@@ -3940,7 +3940,7 @@ function shouldForceSync(pos, yaw, pitch) {
 
 function sendPlayerMovement() {
   if (!multiplayer || !multiplayer.isConnected || game.mode !== 'online') return
-  if (!game.player || !game.player.pos) {
+  if (!game.pos) {
     console.warn('⚠️ Player not initialized, skip movement sync')
     return
   }
@@ -3949,19 +3949,19 @@ function sendPlayerMovement() {
   const moveSpeed = getMoveSpeed(game.vel)
   const inCombat = checkCombatMode()
   const syncInterval = getSyncInterval(moveSpeed, inCombat)
-  const forceSync = shouldForceSync(game.player.pos, game.yaw, game.pitch)
+  const forceSync = shouldForceSync(game.pos, game.yaw, game.pitch)
 
   if (!forceSync && now - lastMoveSendTime < syncInterval) return
 
   lastMoveSendTime = now
-  lastSyncPos = { ...game.player.pos }
+  lastSyncPos = { ...game.pos }
   lastSyncYaw = game.yaw
   lastSyncPitch = game.pitch
 
   try {
     const weapon = game.getWeapon()
     multiplayer.sendMove(
-      game.player.pos,
+      game.pos,
       { x: game.pitch, y: game.yaw, z: 0 },
       game.vel || { x: 0, y: 0, z: 0 },
       {
