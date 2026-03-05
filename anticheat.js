@@ -507,7 +507,7 @@ class ShootValidator {
      */
     checkReactionTime(playerId, shootData) {
         // 这里需要结合敌人出现的时间点
-        // 简化版本：检测连续射击的间隔是否异常短
+        // 简化版本：检测连续射击的间隔是否异常短（异常快连点）
         
         const playerData = this.playerShots.get(playerId);
         if (!playerData || playerData.shots.length < 3) {
@@ -527,15 +527,15 @@ class ShootValidator {
             }
         }
         
-        // 如果平均反应时间过短
+        // 如果平均射击间隔过短（异常快连点）
         if (hitIntervals.length > 0) {
             const avgInterval = hitIntervals.reduce((a, b) => a + b, 0) / hitIntervals.length;
             
-            if (avgInterval < this.config.MAX_REACTION_TIME) {
+            if (avgInterval < 50) { // 50ms内连续射击（人类极限约60-70ms）
                 return {
-                    type: 'REACTION_TIME_ANOMALY',
+                    type: 'SUPERHUMAN_CLICK_SPEED',
                     avgInterval: avgInterval,
-                    threshold: this.config.MAX_REACTION_TIME,
+                    threshold: 50,
                     timestamp: Date.now()
                 };
             }
