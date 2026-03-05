@@ -3548,7 +3548,11 @@ function returnToLobby() {
   floatingDamageNumbers = []
   clearHealthBars()
 
-  // 仅清理在线模式的事件监听，保留全局基础输入监听
+  // 清理游戏相关的事件监听器（不清理全局错误处理器）
+  // window 的 'error' 和 'unhandledrejection' 是直接通过 addEventListener 注册的，不受影响
+  globalEventManager.clear('canvas');
+  globalEventManager.clear('document');
+  globalEventManager.clear('window');
   globalEventManager.clear('online');
 
   // 清理观战模式
