@@ -186,12 +186,12 @@ class MultiplayerClient {
     })
     this.remoteVisualStates = new Map()
     this.internalVisualBridgeBound = false
-    
+
     // 初始化反作弊系统
     this.antiCheat = null
     this.initAntiCheat()
   }
-  
+
   /**
    * 初始化反作弊系统
    */
@@ -212,7 +212,6 @@ class MultiplayerClient {
       console.log('[反作弊] 系统已初始化')
     }
   }
-  
 
   /**
    * Connect to the multiplayer server
@@ -226,11 +225,11 @@ class MultiplayerClient {
         console.log('页面地址:', window.location.href)
 
         this.socket = io(this.serverUrl, {
-          transports: ['polling', 'websocket'],  // 改用 polling 优先
+          transports: ['polling', 'websocket'],
           reconnection: true,
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
-          timeout: 10000  // 10秒超时
+          timeout: 10000
         })
         this.internalVisualBridgeBound = false
         this.setupVisualStateBridge()
@@ -260,7 +259,6 @@ class MultiplayerClient {
 
           let errorMsg = '无法连接到服务器: ' + error.message
 
-          // 提供更具体的错误提示
           if (error.message && error.message.includes('certificate')) {
             errorMsg = 'SSL证书错误。请在浏览器中访问 https://123.60.21.129 并信任证书后重试。'
           } else if (error.message && error.message.includes('timeout')) {
@@ -286,9 +284,6 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Register a new player
-   */
   async register(username) {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.isConnected) {
@@ -306,7 +301,7 @@ class MultiplayerClient {
       const successHandler = (data) => {
         this.socket.off('registered', successHandler)
         this.socket.off('error', errorHandler)
-        
+
         if (data.success) {
           this.username = username
           this.setLocalVisualState({ name: username })
@@ -325,7 +320,6 @@ class MultiplayerClient {
       this.socket.on('registered', successHandler)
       this.socket.on('error', errorHandler)
 
-      // Timeout handler
       setTimeout(() => {
         this.socket.off('registered', successHandler)
         this.socket.off('error', errorHandler)
@@ -334,9 +328,6 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Create a new room
-   */
   async createRoom(roomName) {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.isConnected) {
@@ -370,9 +361,6 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Join an existing room
-   */
   async joinRoom(roomId) {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.isConnected) {
@@ -406,9 +394,6 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Leave current room
-   */
   leaveRoom() {
     if (this.roomId && this.socket) {
       this.socket.emit('leaveRoom', this.roomId)
@@ -416,18 +401,12 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Request room list
-   */
   getRooms() {
     if (this.socket && this.isConnected) {
       this.socket.emit('getRooms')
     }
   }
 
-  /**
-   * Update local player visualization state
-   */
   setLocalVisualState(state = {}) {
     this.localVisualState = normalizePlayerVisualData({
       ...this.localVisualState,
@@ -437,42 +416,26 @@ class MultiplayerClient {
     return { ...this.localVisualState }
   }
 
-  /**
-   * Get local player visualization state
-   */
   getLocalVisualState() {
     return { ...this.localVisualState }
   }
 
-  /**
-   * Get remote player visualization state
-   */
   getRemoteVisualState(playerId) {
     if (!playerId) return null
     const value = this.remoteVisualStates.get(playerId)
     return value ? { ...value } : null
   }
 
-  /**
-   * Get all remote player visualization states
-   */
   getRemoteVisualStateMap() {
     return new Map(this.remoteVisualStates)
   }
 
-  /**
-   * Subscribe to remote visualization updates
-   */
   onVisualStateUpdate(callback) {
     this.onVisualStateUpdateCallback = callback
   }
 
-  /**
-   * Send player movement
-   */
   sendMove(position, rotation, velocity, state = {}) {
     if (this.roomId && this.socket && this.isConnected) {
-      // 反作弊检测 - 速度和位置验证
       if (this.antiCheat && this.playerId) {
         const antiCheatResult = this.antiCheat.checkMovement(
           this.playerId,
@@ -483,13 +446,12 @@ class MultiplayerClient {
             isJumping: state.isJumping || false
           }
         )
-        
-        // 如果检测到违规，记录但继续发送（由服务器决定是否拒绝）
+
         if (!antiCheatResult.isValid) {
           console.warn('[反作弊] 移动验证失败', antiCheatResult)
         }
       }
-      
+
       const visualState = this.setLocalVisualState(state)
       this.socket.emit('move', {
         roomId: this.roomId,
@@ -507,12 +469,8 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Send shooting event
-   */
   sendShoot(targetPlayerId, weaponType = 'unknown', extra = {}) {
     if (this.roomId && this.socket && this.isConnected) {
-      // 反作弊检测 - 射击验证
       if (this.antiCheat && this.playerId) {
         const antiCheatResult = this.antiCheat.checkShoot(
           this.playerId,
@@ -523,13 +481,12 @@ class MultiplayerClient {
             targetPosition: extra.targetPosition || null
           }
         )
-        
-        // 如果检测到违规，记录但继续发送（由服务器决定是否拒绝）
+
         if (!antiCheatResult.valid) {
           console.warn('[反作弊] 射击验证失败', antiCheatResult)
         }
       }
-      
+
       const payload = {
         roomId: this.roomId,
         targetId: targetPlayerId || null,
@@ -541,9 +498,6 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Send chat message
-   */
   sendChat(message, channel = 'global') {
     if (this.roomId && this.socket && this.isConnected) {
       this.socket.emit('chat', {
@@ -554,20 +508,12 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Set callback for chat messages
-   */
   onChat(callback) {
     if (this.socket) {
       this.socket.on('chat', callback)
     }
   }
 
-  /**
-   * Send buy event to other players
-   * @param {string} itemType - 'weapon' or 'equip'
-   * @param {string} itemId - Weapon or equipment ID
-   */
   sendBuy(itemType, itemId) {
     if (this.roomId && this.socket && this.isConnected) {
       this.socket.emit('buy', {
@@ -579,35 +525,20 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Set callback for buy events from other players
-   * @param {function} callback - Callback function receives { playerId, playerName, itemType, itemId }
-   */
   onBuy(callback) {
     if (this.socket) {
       this.socket.on('buy', callback)
     }
   }
 
-  /**
-   * Check if current game state is in freeze time (buy phase)
-   * @returns {boolean}
-   */
   isInFreezeTime() {
-    // This should be synced with the server's round state
-    // For now, return true if connected and in a room
     return this.isConnected && this.roomId !== null
   }
 
-  /**
-   * Send hit event (damage dealt to another player)
-   */
   sendHit(targetPlayerId, damage, weaponType = 'unknown', extra = {}) {
     if (this.roomId && this.socket && this.isConnected) {
-      // 新协议：统一通过 shoot 事件上报命中信息
       this.sendShoot(targetPlayerId, weaponType, { damage, ...extra })
 
-      // 旧协议兼容：保留 hit 事件
       this.socket.emit('hit', {
         roomId: this.roomId,
         targetPlayerId,
@@ -616,24 +547,17 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Set callback for player damage
-   */
   onPlayerDamaged(callback) {
     if (this.socket) {
       this.socket.on('playerDamaged', callback)
     }
   }
 
-  /**
-   * Set callback for damage events (new protocol)
-   */
   onDamage(callback) {
     if (!this.socket) return
 
     this.socket.on('damage', callback)
 
-    // 旧协议兼容
     this.socket.on('playerDamaged', (data) => {
       callback({
         ...data,
@@ -643,9 +567,6 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Set callback for player death
-   */
   onPlayerDied(callback) {
     if (this.socket) {
       this.socket.on('playerDied', (data = {}) => {
@@ -654,9 +575,6 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Set callback for death events (new protocol)
-   */
   onDeath(callback) {
     if (!this.socket) return
 
@@ -664,30 +582,22 @@ class MultiplayerClient {
       callback(normalizeDeathEventData(data))
     })
 
-    // 旧协议兼容
     this.socket.on('playerDied', (data = {}) => {
       callback(normalizeDeathEventData(data))
     })
   }
 
-  /**
-   * Set callback for player respawn
-   */
   onPlayerRespawned(callback) {
     if (this.socket) {
       this.socket.on('playerRespawned', callback)
     }
   }
 
-  /**
-   * Set callback for respawn events (new protocol)
-   */
   onRespawn(callback) {
     if (!this.socket) return
 
     this.socket.on('respawn', callback)
 
-    // 旧协议兼容
     this.socket.on('playerRespawned', (data) => {
       callback({
         ...data,
@@ -696,107 +606,70 @@ class MultiplayerClient {
     })
   }
 
-  /**
-   * Request respawn from server
-   */
   requestRespawn() {
     if (this.roomId && this.socket && this.isConnected) {
       const payload = { roomId: this.roomId }
       this.socket.emit('respawnRequest', payload)
-      // 旧服务器可能监听 respawn 作为请求事件
       this.socket.emit('respawn', payload)
     }
   }
 
-  /**
-   * Set callback for room list updates
-   */
   onRoomList(callback) {
     if (this.socket) {
       this.socket.on('roomList', callback)
     }
   }
 
-  /**
-   * Set callback for player movement
-   */
   onPlayerMove(callback) {
     if (this.socket) {
       this.socket.on('playerMove', callback)
     }
   }
 
-  /**
-   * Set callback for player shooting
-   */
   onPlayerShoot(callback) {
     if (this.socket) {
       this.socket.on('playerShoot', callback)
     }
   }
 
-  /**
-   * Set callback for player join
-   */
   onPlayerJoined(callback) {
     if (this.socket) {
       this.socket.on('playerJoined', callback)
     }
   }
 
-  /**
-   * Set callback for player leave
-   */
   onPlayerLeft(callback) {
     if (this.socket) {
       this.socket.on('playerLeft', callback)
     }
   }
 
-  /**
-   * Set callback for room updates
-   */
   onRoomUpdate(callback) {
     if (this.socket) {
       this.socket.on('roomUpdate', callback)
     }
   }
 
-  /**
-   * Set callback for game start
-   */
   onGameStart(callback) {
     if (this.socket) {
       this.socket.on('gameStart', callback)
     }
   }
 
-  /**
-   * Start game (host only)
-   */
   startGame() {
     if (this.roomId && this.socket && this.isConnected) {
       this.socket.emit('startGame', { roomId: this.roomId })
     }
   }
 
-  /**
-   * Set callback for errors
-   */
   onError(callback) {
     this.onErrorCallback = callback
   }
 
-  /**
-   * Set callback for disconnect
-   */
   onDisconnect(callback) {
     this.onDisconnectCallback = callback
   }
 
-  /**
-   * Disconnect from server
-   */
   disconnect() {
     if (this.socket) {
       this.socket.disconnect()
@@ -818,24 +691,13 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Get scoreboard data
-   * Returns all players' score data
-   */
   getScoreboardData() {
-    // This method will be called from the game to get player stats
-    // The actual implementation will depend on how player stats are stored in the game
     return {
       ct: [],
       t: []
     }
   }
 
-  /**
-   * Get team color based on team type
-   * @param {string} team - Team type ('ct' or 't')
-   * @returns {object} - Color object with hex and rgb properties
-   */
   getTeamColor(team) {
     const visual = getTeamVisual(team)
     return {
@@ -845,27 +707,14 @@ class MultiplayerClient {
     }
   }
 
-  /**
-   * Get team color in v3 format (for rendering)
-   * @param {string} team - Team type ('ct' or 't')
-   * @returns {object} - v3 color object {x, y, z}
-   */
   getTeamColorV3(team) {
     return this.getTeamColor(team).v3
   }
 
-  /**
-   * Get team color in hex format
-   * @param {string} team - Team type ('ct' or 't')
-   * @returns {string} - Hex color string
-   */
   getTeamColorHex(team) {
     return this.getTeamColor(team).hex
   }
 
-  /**
-   * Get weapon icon key for HUD rendering
-   */
   getWeaponIcon(weapon) {
     return getWeaponIcon(weapon)
   }

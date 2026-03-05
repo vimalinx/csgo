@@ -24,6 +24,7 @@ export default class Radar {
     this.sizeIndex = 0
     this.pad = 12
     this.visible = true
+    this.size = this.sizes[0]
 
     // Canvas 设置
     this.canvas = document.createElement('canvas')
@@ -84,16 +85,18 @@ export default class Radar {
   }
 
   // 检查两点之间的视线是否被障碍物阻挡
-  lineOfSightBlocked(start, end, boxes) {
+  lineOfSightBlocked(start, end, boxes = []) {
+    if (!start || !end || !Array.isArray(boxes)) return false
+
     const dx = end.x - start.x
     const dy = end.y - start.y
     const dz = end.z - start.z
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-    
+
     if (dist < 0.1) return false
-    
+
     const steps = Math.ceil(dist / 0.5) // 每0.5单位检查一次
-    
+
     for (let i = 1; i < steps; i++) {
       const t = i / steps
       const checkPoint = {
@@ -101,48 +104,54 @@ export default class Radar {
         y: start.y + dy * t,
         z: start.z + dz * t
       }
-      
+
       // 检查是否与任何障碍物碰撞
       for (const box of boxes) {
-        if (!box.solid) continue
+        if (!box || !box.solid || !box.pos || !box.scale) continue
         if (box.scale.x > 50 && box.scale.z > 50) continue // 跳过地面
-        
+
         const halfX = box.scale.x * 0.5
         const halfY = box.scale.y * 0.5
         const halfZ = box.scale.z * 0.5
-        
-        if (checkPoint.x >= box.pos.x - halfX && checkPoint.x <= box.pos.x + halfX &&
-            checkPoint.y >= box.pos.y - halfY && checkPoint.y <= box.pos.y + halfY &&
-            checkPoint.z >= box.pos.z - halfZ && checkPoint.z <= box.pos.z + halfZ) {
+
+        if (
+          checkPoint.x >= box.pos.x - halfX && checkPoint.x <= box.pos.x + halfX &&
+          checkPoint.y >= box.pos.y - halfY && checkPoint.y <= box.pos.y + halfY &&
+          checkPoint.z >= box.pos.z - halfZ && checkPoint.z <= box.pos.z + halfZ
+        ) {
           return true
         }
       }
     }
-    
+
     return false
   }
 
   // 检查敌人是否可见（玩家视野或队友视野）
-  isEnemyVisible(enemyPos, playerPos, bots, boxes) {
+  isEnemyVisible(enemyPos, playerPos, bots = [], boxes = []) {
+    if (!enemyPos || !playerPos) return false
+
     // 检查玩家是否能直接看到敌人
     if (!this.lineOfSightBlocked(playerPos, enemyPos, boxes)) {
       return true
     }
-    
+
     // 检查队友是否能看到敌人
     for (const bot of bots) {
-      if (!bot.alive) continue
+      if (!bot || !bot.alive || !bot.pos) continue
       if (normalizeTeam(bot.team) !== normalizeTeam(this.game.team)) continue
-      
+
       if (!this.lineOfSightBlocked(bot.pos, enemyPos, boxes)) {
         return true
       }
     }
-    
+
     return false
   }
 
   drawObstacle(bounds, box) {
+    if (!box || !box.pos || !box.scale) return
+
     const halfX = box.scale.x * 0.5
     const halfZ = box.scale.z * 0.5
 
@@ -157,6 +166,7 @@ export default class Radar {
   }
 
   drawDot(pos, color, radius, bounds) {
+    if (!pos) return
     const p = this.worldToMap(pos.x, pos.z, bounds)
     this.ctx.beginPath()
     this.ctx.fillStyle = color
@@ -165,15 +175,16 @@ export default class Radar {
   }
 
   drawArrow(pos, yaw, color, length, bounds) {
+    if (!pos || !Number.isFinite(yaw)) return
     const p = this.worldToMap(pos.x, pos.z, bounds)
-    
+
     // 计算朝向方向
     const dirX = Math.sin(yaw)
     const dirZ = Math.cos(yaw)
-    
+
     // 箭头终点
     const endP = this.worldToMap(pos.x + dirX * length, pos.z + dirZ * length, bounds)
-    
+
     // 绘制箭头线
     this.ctx.strokeStyle = color
     this.ctx.lineWidth = 2
@@ -181,11 +192,11 @@ export default class Radar {
     this.ctx.moveTo(p.x, p.y)
     this.ctx.lineTo(endP.x, endP.y)
     this.ctx.stroke()
-    
+
     // 绘制箭头头部
     const headLength = 4
     const angle = Math.atan2(endP.y - p.y, endP.x - p.x)
-    
+
     this.ctx.fillStyle = color
     this.ctx.beginPath()
     this.ctx.moveTo(endP.x, endP.y)
@@ -202,33 +213,36 @@ export default class Radar {
   }
 
   drawBombSite(bounds, site) {
+    if (!site || !site.pos) return
+    const mapBounds = Math.max(1, this.game?.mapBounds || 1)
     const p = this.worldToMap(site.pos.x, site.pos.z, bounds)
-    const radius = Math.max(4, (site.radius / (this.game.mapBounds * 2)) * this.size)
-    
+    const radius = Math.max(4, ((site.radius || 1) / (mapBounds * 2)) * this.size)
+
     // 绘制包点圆圈
     this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)'
     this.ctx.lineWidth = 2
     this.ctx.beginPath()
     this.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
     this.ctx.stroke()
-    
+
     // 绘制包点标记（A 或 B）
     this.ctx.fillStyle = 'rgba(255, 215, 0, 0.9)'
     this.ctx.font = `bold ${Math.max(12, this.size / 16)}px monospace`
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.ctx.fillText(site.key, p.x, p.y)
+    this.ctx.fillText(site.key || '?', p.x, p.y)
   }
 
   drawBomb(bounds, bombPos) {
+    if (!bombPos) return
     const p = this.worldToMap(bombPos.x, bombPos.z, bounds)
-    
+
     // 绘制炸弹标记
     this.ctx.fillStyle = 'rgba(255, 60, 60, 0.95)'
     this.ctx.beginPath()
     this.ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
     this.ctx.fill()
-    
+
     // 绘制炸弹图标（十字）
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)'
     this.ctx.lineWidth = 2
@@ -244,7 +258,8 @@ export default class Radar {
     if (!this.visible || this.size === 0) return
 
     const ctx = this.ctx
-    const bounds = Math.max(1, this.game.mapBounds + 0.5)
+    const mapBounds = Number.isFinite(this.game?.mapBounds) ? this.game.mapBounds : 128
+    const bounds = Math.max(1, mapBounds + 0.5)
     const inner = this.size - this.pad * 2
 
     // 清空画布
@@ -253,7 +268,7 @@ export default class Radar {
     // 绘制半透明背景
     ctx.fillStyle = 'rgba(6, 10, 16, 0.75)'
     ctx.fillRect(0, 0, this.size, this.size)
-    
+
     // 绘制边框
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
     ctx.lineWidth = 1.5
@@ -268,8 +283,9 @@ export default class Radar {
     // 绘制障碍物
     ctx.fillStyle = 'rgba(170, 188, 214, 0.2)'
     ctx.strokeStyle = 'rgba(190, 207, 228, 0.4)'
-    for (const box of this.game.boxes) {
-      if (!box.solid) continue
+    const boxes = Array.isArray(this.game?.boxes) ? this.game.boxes : []
+    for (const box of boxes) {
+      if (!box || !box.solid || !box.scale) continue
       if (box.scale.x > 50 && box.scale.z > 50) continue
       this.drawObstacle(bounds, box)
     }
@@ -285,7 +301,7 @@ export default class Radar {
     }
 
     // 绘制包点
-    if (this.game.round && this.game.round.sites) {
+    if (this.game.round && Array.isArray(this.game.round.sites)) {
       for (const site of this.game.round.sites) {
         this.drawBombSite(bounds, site)
       }
@@ -298,33 +314,34 @@ export default class Radar {
 
     // 绘制敌人（仅当可见时）
     const playerTeam = normalizeTeam(this.game.team)
-    for (const bot of this.game.bots) {
-      if (!bot.alive) continue
-      
+    const bots = Array.isArray(this.game?.bots) ? this.game.bots : []
+    for (const bot of bots) {
+      if (!bot || !bot.alive || !bot.pos) continue
+
       const botTeam = normalizeTeam(bot.team)
-      
+
       // 只显示敌人
       if (botTeam === playerTeam) continue
-      
+
       // 检查敌人是否可见
-      if (!this.isEnemyVisible(bot.pos, this.game.pos, this.game.bots, this.game.boxes)) {
+      if (!this.isEnemyVisible(bot.pos, this.game.pos, bots, boxes)) {
         continue
       }
-      
-      const color = TEAM_VISUALS[botTeam].hex
+
+      const color = (TEAM_COLORS[botTeam] || TEAM_COLORS.neutral).hex
       this.drawDot(bot.pos, color, 3, bounds)
     }
 
     // 绘制队友（带朝向）
-    for (const bot of this.game.bots) {
-      if (!bot.alive) continue
-      
+    for (const bot of bots) {
+      if (!bot || !bot.alive || !bot.pos) continue
+
       const botTeam = normalizeTeam(bot.team)
       if (botTeam !== playerTeam) continue
-      
-      const color = TEAM_VISUALS[botTeam].hex
+
+      const color = (TEAM_COLORS[botTeam] || TEAM_COLORS.neutral).hex
       this.drawDot(bot.pos, color, 3, bounds)
-      
+
       // 绘制队友朝向
       if (bot.yaw !== undefined) {
         this.drawArrow(bot.pos, bot.yaw, color, 1.8, bounds)
@@ -332,16 +349,13 @@ export default class Radar {
     }
 
     // 绘制玩家（自己）
-    if (this.game.playerAlive) {
+    if (this.game.playerAlive && this.game.pos) {
       const playerColor = '#4f9cff'
       this.drawDot(this.game.pos, playerColor, 4, bounds)
-      
-      // 绘制玩家朝向
-      this.drawArrow(this.game.pos, this.game.yaw, playerColor, 2.4, bounds)
-    }
 
-    // 绘制爆炸物标记（如果游戏中有爆炸物）
-    // TODO: 添加爆炸物追踪系统
+      // 绘制玩家朝向
+      this.drawArrow(this.game.pos, this.game.yaw || 0, playerColor, 2.4, bounds)
+    }
 
     // 绘制雷达大小指示器
     ctx.fillStyle = 'rgba(221, 231, 244, 0.7)'
