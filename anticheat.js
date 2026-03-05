@@ -36,6 +36,21 @@ const ANTI_CHEAT_CONFIG = {
     BAN_THRESHOLD: 20        // 封禁阈值
 };
 
+const WEAPON_RECOIL_PATTERNS = {
+    'ak47': [
+        {x: 0, y: 0}, {x: -2, y: 30}, {x: -5, y: 50}, {x: -10, y: 70}, {x: -15, y: 85},
+        {x: -20, y: 95}, {x: -25, y: 100}, {x: -30, y: 100}, {x: -30, y: 95}, {x: -25, y: 90}
+    ],
+    'm4a1': [
+        {x: 0, y: 0}, {x: -1, y: 25}, {x: -3, y: 45}, {x: -7, y: 60}, {x: -12, y: 72},
+        {x: -17, y: 80}, {x: -22, y: 85}, {x: -25, y: 85}, {x: -25, y: 82}, {x: -22, y: 78}
+    ],
+    'awp': [{x: 0, y: 0}, {x: -10, y: 80}],
+    'deagle': [
+        {x: 0, y: 0}, {x: -5, y: 45}, {x: -12, y: 70}, {x: -18, y: 85}, {x: -22, y: 92}
+    ]
+};
+
 // ==================== SpeedLimiter 类 ====================
 /**
  * 速度限制器 - 检测玩家移动速度异常
@@ -336,6 +351,44 @@ class PositionValidator {
     }
 }
 
+// ==================== RecoilPatternValidator 类 ====================
+/**
+ * 后座力模式验证器 - 检测无后座异常
+ */
+class RecoilPatternValidator {
+    validateRecoilPattern(weapon, shots) {
+        const expectedPattern = WEAPON_RECOIL_PATTERNS[weapon];
+        if (!expectedPattern || shots.length < 3) return { valid: true };
+        
+        const actualPattern = this.calculatePattern(shots);
+        const deviation = this.calculateDeviation(expectedPattern, actualPattern);
+        
+        if (deviation < 0.3) {
+            return { valid: false, reason: 'NO_RECOIL_SUSPECTED', deviation };
+        }
+        return { valid: true };
+    }
+    
+    calculatePattern(shots) {
+        return shots.map((shot, i) => {
+            if (i === 0) return { x: 0, y: 0 };
+            return { x: shot.x - shots[0].x, y: shot.y - shots[0].y };
+        });
+    }
+    
+    calculateDeviation(expected, actual) {
+        let totalDeviation = 0;
+        const len = Math.min(expected.length, actual.length);
+        
+        for (let i = 0; i < len; i++) {
+            const dx = expected[i].x - actual[i].x;
+            const dy = expected[i].y - actual[i].y;
+            totalDeviation += Math.sqrt(dx * dx + dy * dy);
+        }
+        return totalDeviation / len;
+    }
+}
+
 // ==================== ShootValidator 类 ====================
 /**
  * 射击验证器 - 检测异常射击行为（自瞄、射速异常等）
@@ -343,6 +396,7 @@ class PositionValidator {
 class ShootValidator {
     constructor(config = ANTI_CHEAT_CONFIG) {
         this.config = config;
+        this.recoilValidator = new RecoilPatternValidator();
         this.playerShots = new Map();  // 玩家射击记录
         this.violations = new Map();   // 违规记录
     }
@@ -382,7 +436,24 @@ class ShootValidator {
             }
         }
         
-        // 2. 检测自瞄（视角瞬间锁定）
+        // 2. 检测无后座（需要在 shootData 中包含 recentShots 数组）
+        if (shootData.recentShots && shootData.recentShots.length >= 3) {
+            const recoilResult = this.recoilValidator.validateRecoilPattern(
+                shootData.weapon,
+                shootData.recentShots
+            );
+            
+            if (!recoilResult.valid) {
+                issues.push({
+                    type: recoilResult.reason,
+                    weapon: shootData.weapon,
+                    deviation: recoilResult.deviation,
+                    timestamp: Date.now()
+                });
+            }
+        }
+        
+        // 3. 检测自瞄（视角瞬间锁定）
         if (playerData.lastShot && targetPosition) {
             const aimbotIssue = this.checkAimbot(
                 playerData.lastShot,
@@ -394,7 +465,7 @@ class ShootValidator {
             }
         }
         
-        // 3. 检测异常反应时间
+        // 4. 检测异常反应时间
         if (targetPosition) {
             const reactionIssue = this.checkReactionTime(
                 playerId,

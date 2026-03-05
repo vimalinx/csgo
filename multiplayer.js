@@ -298,35 +298,54 @@ class MultiplayerClient {
         return
       }
 
-      this.socket.emit('register', username)
+      let resolved = false
+      let timeoutId = null
 
-      const successHandler = (data) => {
+      const cleanup = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
         this.removeEventHandlers('__register', successHandler)
         this.removeEventHandlers('__register', errorHandler)
+      }
 
+      const resolveOnce = (data) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
+        resolve(data)
+      }
+
+      const rejectOnce = (error) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(error)
+      }
+
+      const successHandler = (data) => {
         if (data.success) {
           this.username = username
           this.setLocalVisualState({ name: username })
-          resolve(data)
+          resolveOnce(data)
         } else {
-          reject(new Error(data.error || '注册失败'))
+          rejectOnce(new Error(data.error || '注册失败'))
         }
       }
 
       const errorHandler = (error) => {
-        this.removeEventHandlers('__register', successHandler)
-        this.removeEventHandlers('__register', errorHandler)
-        reject(new Error(error))
+        rejectOnce(new Error(error))
       }
 
       this.addEventHandler('__register', 'registered', successHandler)
       this.addEventHandler('__register', 'error', errorHandler)
 
-      setTimeout(() => {
-        this.removeEventHandlers('__register', successHandler)
-        this.removeEventHandlers('__register', errorHandler)
-        reject(new Error('注册超时'))
+      timeoutId = setTimeout(() => {
+        rejectOnce(new Error('注册超时'))
       }, 5000)
+
+      this.socket.emit('register', username)
     })
   }
 
@@ -337,29 +356,49 @@ class MultiplayerClient {
         return
       }
 
-      this.socket.emit('createRoom', roomName)
+      let resolved = false
+      let timeoutId = null
 
-      const createdHandler = (data) => {
+      const cleanup = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
         this.removeEventHandlers('__createRoom', createdHandler)
         this.removeEventHandlers('__createRoom', errorHandler)
-        this.roomId = data.roomId
+      }
+
+      const resolveOnce = (data) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
         resolve(data)
       }
 
+      const rejectOnce = (error) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(error)
+      }
+
+      const createdHandler = (data) => {
+        this.roomId = data.roomId
+        resolveOnce(data)
+      }
+
       const errorHandler = (error) => {
-        this.removeEventHandlers('__createRoom', createdHandler)
-        this.removeEventHandlers('__createRoom', errorHandler)
-        reject(new Error(error))
+        rejectOnce(new Error(error))
       }
 
       this.addEventHandler('__createRoom', 'roomCreated', createdHandler)
       this.addEventHandler('__createRoom', 'error', errorHandler)
 
-      setTimeout(() => {
-        this.removeEventHandlers('__createRoom', createdHandler)
-        this.removeEventHandlers('__createRoom', errorHandler)
-        reject(new Error('创建房间超时'))
+      timeoutId = setTimeout(() => {
+        rejectOnce(new Error('创建房间超时'))
       }, 5000)
+
+      this.socket.emit('createRoom', roomName)
     })
   }
 
@@ -370,29 +409,49 @@ class MultiplayerClient {
         return
       }
 
-      this.socket.emit('joinRoom', roomId)
+      let resolved = false
+      let timeoutId = null
 
-      const joinedHandler = (data) => {
+      const cleanup = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
         this.removeEventHandlers('__joinRoom', joinedHandler)
         this.removeEventHandlers('__joinRoom', errorHandler)
-        this.roomId = roomId
+      }
+
+      const resolveOnce = (data) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
         resolve(data)
       }
 
+      const rejectOnce = (error) => {
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(error)
+      }
+
+      const joinedHandler = (data) => {
+        this.roomId = roomId
+        resolveOnce(data)
+      }
+
       const errorHandler = (error) => {
-        this.removeEventHandlers('__joinRoom', joinedHandler)
-        this.removeEventHandlers('__joinRoom', errorHandler)
-        reject(new Error(error))
+        rejectOnce(new Error(error))
       }
 
       this.addEventHandler('__joinRoom', 'joinedRoom', joinedHandler)
       this.addEventHandler('__joinRoom', 'error', errorHandler)
 
-      setTimeout(() => {
-        this.removeEventHandlers('__joinRoom', joinedHandler)
-        this.removeEventHandlers('__joinRoom', errorHandler)
-        reject(new Error('加入房间超时'))
+      timeoutId = setTimeout(() => {
+        rejectOnce(new Error('加入房间超时'))
       }, 5000)
+
+      this.socket.emit('joinRoom', roomId)
     })
   }
 
